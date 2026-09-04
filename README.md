@@ -3,9 +3,9 @@ Pengembangan platform AI Personal Manager, sebuah sistem asisten cerdas yang dir
  
 Kelompok Sukses IP nya 4 di semester 5  
 
-Ketua Kelompok: 
+Ketua Kelompok: Annora Farah Aprilla Setyawan - 24/538937/TK/59766
 
-Anggota 1:  
+Anggota 1:  Annora Farah Aprilla Setyawan - 24/538937/TK/59766
 
 Anggota 2:
 
