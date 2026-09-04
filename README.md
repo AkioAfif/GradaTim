@@ -1,0 +1,2 @@
+# GradaTim
+Pengembangan platform AI Personal Manager, sebuah sistem asisten cerdas yang dirancang untuk memecah target jangka panjang yang kompleks menjadi rangkaian rencana aksi kecil yang terukur dan realistis. 
