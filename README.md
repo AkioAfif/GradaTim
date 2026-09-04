@@ -7,7 +7,7 @@ Ketua Kelompok:
 
 Anggota 1:  
 
-Anggota 2:
+Anggota 2: Akio Afifian Ahsan - 24/542230/TK/60198
 
 Anggota 3:  
 
