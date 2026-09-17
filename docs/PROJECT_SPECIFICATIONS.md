@@ -63,13 +63,20 @@
 
 ## 4. Persyaratan Fungsional (Functional Requirements)
 
-* **FR-1: User Management & Profile:** Autentikasi pengguna dasar dan preferensi waktu luang harian.
-* **FR-2: AI Goal Decomposition (Core Feature):**
-  * Input: Target Utama (*Goal Title*), Tenggat Waktu (*Deadline*), dan Alokasi Waktu Harian.
-  * Output: Rincian *Milestones* dan daftar tugas harian berskala mikro (*Actionable Tasks*).
-* **FR-3: Today Action List (Anti-Overwhelm View):** Tampilan khusus yang hanya menampilkan maksimal 3–5 tugas fokus untuk hari berjalan.
-* **FR-4: Interactive Milestone Tracker:** Kemampuan menandai tugas selesai yang secara otomatis memperbarui persentase *progress bar* target utama.
-* **FR-5: Schedule & Constraint Manager:** Penyesuaian jadwal ulang otomatis jika tugas harian terlewati (*overdue adjustment*).
+| Kode | Nama Fitur | Deskripsi Fungsional |
+| :--- | :--- | :--- |
+| **FR-1** | **Input Goal & Deadline** | Sistem harus memfasilitasi pengguna untuk memasukkan target utama (*goal*), deskripsi target, serta batas waktu penyelesaian (*deadline*). |
+| **FR-2** | **Dekomposisi Goal Berbasis AI** | Sistem harus mampu menguraikan target besar pengguna secara hierarkis menggunakan kecerdasan buatan (AI) menjadi *milestone*, *sub-task*, hingga rencana aksi harian/mingguan (*actionable items*). |
+| **FR-3** | **Input Constraints Waktu** | Sistem harus memfasilitasi pengguna untuk mendefinisikan ketersediaan waktu pengerjaan tugas, meliputi jam kosong harian dan hari luang (*time constraints*). |
+| **FR-4** | **Penjadwalan Tugas Otomatis** | Sistem harus dapat memetakan dan menjadwalkan daftar tugas harian secara otomatis ke dalam kalender pengguna berdasarkan batasan waktu (*constraints*) yang telah diisi. |
+| **FR-5** | **Deteksi Konflik Jadwal** | Sistem harus dapat mendeteksi bentrok jadwal (*conflict detection / double booking*) pada kalender dan mencegah penempatan tugas pada slot waktu yang sudah terisi agenda lain. |
+| **FR-6** | **Pengisian Kuisioner Mood** | Sistem harus menyediakan antarmuka kuisioner singkat (berisi 5 pertanyaan) bagi pengguna untuk mengevaluasi kondisi emosional dan kesiapan mental pada hari tersebut. |
+| **FR-7** | **Penentuan Prioritas Berbasis Mood** | Sistem harus memproses hasil kuisioner untuk merekomendasikan dan menyesuaikan beban tugas yang paling cocok dikerjakan pengguna sesuai dengan kondisi mood saat itu. |
+| **FR-8** | **Penentuan Skala Prioritas Tugas** | Sistem harus menentukan dan menyusun tugas dengan tingkat urgensi dan prioritas lebih tinggi ke urutan teratas pada daftar tugas (*to-do list*). |
+| **FR-9** | **Tampilan Informasi Effort vs. Impact** | Sistem harus menampilkan estimasi tingkat usaha (*effort*) yang diperlukan serta dampak keberhasilan (*impact*) dari masing-masing tugas untuk membantu evaluasi pengguna. |
+| **FR-10** | **Tampilan Daftar Tugas Harian & Mingguan** | Sistem harus menyajikan antarmuka visual khusus (*Daily/Weekly Task View*) yang memuat daftar aksi hari ini (*Today's Action List*) yang dapat ditandai selesai. |
+| **FR-11** | **Penyesuaian Jadwal Adaptif (Re-Planning)** | Sistem harus mampu mendeteksi tugas yang melewati batas waktu (*deadline*), kemudian secara otomatis menjadwalkan ulang (*readjust*) tugas tersebut ke slot kalender kosong berikutnya. |
+| **FR-12** | **Visualisasi Progres Penyelesaian** | Sistem harus menyajikan indikator visual berupa *progress bar* yang menampilkan persentase ketercapaian tugas harian, mingguan, maupun akumulasi target bulanan secara *real-time*. |
 
 ---
 
