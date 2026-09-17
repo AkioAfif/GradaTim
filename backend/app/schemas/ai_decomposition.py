@@ -1,0 +1,1 @@
+"""AI JSON contract schema"""
