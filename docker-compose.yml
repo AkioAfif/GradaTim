@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: gradatim-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gradatim
+      POSTGRES_PASSWORD: gradatim
+      POSTGRES_DB: gradatim
+    ports:
+      - "5432:5432"
+    volumes:
+      - gradatim_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gradatim -d gradatim"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    container_name: gradatim-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      # Overrides whatever host is in .env — inside the Docker network,
+      # Postgres is reachable at the service name "db", not localhost.
+      DATABASE_URL: postgresql://gradatim:gradatim@db:5432/gradatim
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+
+volumes:
+  gradatim_pgdata:
