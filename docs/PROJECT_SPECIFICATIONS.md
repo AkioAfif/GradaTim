@@ -145,29 +145,167 @@ Alur kerja kartu issue di GitHub Projects dibagi menjadi 5 kolom:
 
 ---
 
-## 8. Petunjuk Pengembangan Lokal (Local Setup)
+## 8. Panduan Konfigurasi Lingkungan Lokal (Backend)
 
-### Prerequisites
-* Git
-* Docker & Docker Compose
-* Node.js (v18+) / Python (3.10+)
+> Bagian ini memuat prosedur standar yang **wajib** dilakukan sebelum melaksanakan proses pengembangan pada layanan *backend* GradaTim guna memastikan lingkungan kerja yang konsisten bagi seluruh pengembang.
 
-### Quick Start
-1. **Clone Repositori:**
+### Prasyarat Perangkat Lunak
+
+Pastikan perangkat lunak berikut telah terpasang sebelum memulai konfigurasi:
+
+| Perangkat Lunak | Versi Minimum | Perintah Pengecekan |
+|---|---|---|
+| **Python** | 3.11+ | `python --version` |
+| **Git** | 2.x | `git --version` |
+| **VS Code** | Rilis Terkini | Verifikasi melalui sistem operasi |
+| **Python Extension (VS Code)** | Rilis Terkini | Verifikasi melalui menu *Extensions* |
+
+> ⚠️ **Catatan Penting:** Saat melakukan instalasi Python, pastikan opsi **"Add Python to PATH"** telah dipilih agar perintah `python` dapat dikenali oleh *Command Line Interface*.
+
+---
+
+### Prosedur Konfigurasi
+
+#### 1. Kloning Repositori
+
+```bash
+git clone https://github.com/AkioAfif/GradaTim.git
+cd GradaTim
+```
+
+---
+
+#### 2. Navigasi ke Direktori Backend
+
+```bash
+cd backend
+```
+
+Seluruh perintah selanjutnya harus dieksekusi dari dalam direktori `backend/`.
+
+---
+
+#### 3. Pembuatan Lingkungan Virtual (*Virtual Environment*)
+
+Penggunaan *virtual environment* (`venv`) bertujuan untuk mengisolasi dependensi proyek dari instalasi Python global guna menghindari konflik versi antar paket.
+
+```bash
+python -m venv venv
+```
+
+Direktori `venv/` akan terbuat secara otomatis. Direktori ini tidak perlu disertakan ke dalam *version control* (telah dikecualikan melalui aturan `.gitignore`).
+
+---
+
+#### 4. Aktivasi Lingkungan Virtual
+
+Aktivasi `venv` wajib dilakukan pada setiap sesi terminal baru sebelum melaksanakan instruksi yang terkait dengan proyek.
+
+**Sistem Operasi Windows (PowerShell):**
+```powershell
+.\venv\Scripts\Activate
+```
+
+**Sistem Operasi Windows (Command Prompt):**
+```cmd
+venv\Scripts\activate.bat
+```
+
+**Sistem Operasi macOS / Linux:**
+```bash
+source venv/bin/activate
+```
+
+> ✅ Indikator keberhasilan: Terminal akan menampilkan awalan `(venv)` pada baris perintah yang aktif.
+
+---
+
+#### 5. Instalasi Dependensi
+
+Jalankan perintah berikut untuk menginstal seluruh paket pustaka yang dideklarasikan, seperti FastAPI, SQLAlchemy, Alembic, dan Pydantic:
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+#### 6. Konfigurasi Variabel Lingkungan (*Environment Variables*)
+
+Proyek ini memerlukan sekumpulan variabel lingkungan untuk menyimpan konfigurasi sensitif. Konfigurasi ini tidak disertakan ke dalam *version control*.
+
+1. Duplikasi berkas *template*:
    ```bash
-   git clone https://github.com/Username/GradaTim.git
-   cd GradaTim
+   copy .env.example .env
+   ```
+   *(Pengguna macOS/Linux: `cp .env.example .env`)*
+
+2. Lakukan penyesuaian nilai pada berkas `.env`:
+   ```env
+   DATABASE_URL=sqlite:///./gradatim_dev.db
+   SECRET_KEY=masukkan-kunci-rahasia-di-sini
+   OPENAI_API_KEY=masukkan-kunci-api-di-sini
    ```
 
-2. **Jalankan Database (Docker):**
-   ```bash
-   docker compose up -d postgres_db
+> 💡 **Keterangan:** Untuk mempercepat pengembangan lokal, *engine* SQLite digunakan secara *default* (`sqlite:///./gradatim_dev.db`), sehingga pengembang tidak diwajibkan untuk menjalankan *instance* PostgreSQL secara mandiri.
+
+---
+
+#### 7. Penyesuaian Python Interpreter (VS Code)
+
+Pastikan Editor VS Code mendeteksi dan menggunakan instalasi Python yang berada di dalam direktori `venv`, alih-alih Python global.
+
+1. Tekan pintasan `Ctrl + Shift + P` (atau `Cmd + Shift + P`) untuk membuka *Command Palette*.
+2. Ketik **"Python: Select Interpreter"** lalu tekan *Enter*.
+3. Pilih *interpreter* dengan jalur yang merujuk pada direktori `venv`:
+   ```
+   Python 3.x.x ('venv': venv)  —  .\venv\Scripts\python.exe
+   ```
+4. Jika tidak tercantum, pilih **"Enter interpreter path..."** dan masukkan lokasi eksekusi Python secara manual:
+   ```
+   backend\venv\Scripts\python.exe
    ```
 
-3. **Verifikasi Container:**
-   ```bash
-   docker ps
-   ```
+---
+
+#### 8. Memuat Ulang *Language Server* (Opsional)
+
+Jika VS Code menampilkan peringatan terkait modul yang belum ditemukan *(import errors)* padahal dependensi telah diinstal, lakukan langkah berikut untuk memuat ulang *language server*:
+
+1. Buka *Command Palette* (`Ctrl + Shift + P`).
+2. Ketik **"Python: Restart Language Server"** lalu tekan *Enter*.
+
+---
+
+#### 9. Pengujian Layanan Backend
+
+Untuk memverifikasi fungsionalitas *backend*, jalankan *server* lokal melalui perintah berikut:
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Akses tautan `http://127.0.0.1:8000/docs` melalui *browser* untuk meninjau dokumentasi *Application Programming Interface* (API) yang disajikan menggunakan **Swagger UI**.
+
+---
+
+### Solusi Kendala Umum (*Troubleshooting*)
+
+#### Kesalahan: "Python was not found"
+- **Penyebab:** Python belum diinstal atau *path* belum dikonfigurasi.
+- **Solusi:** Instal ulang Python dan pastikan opsi **"Add Python to PATH"** telah diaktifkan.
+
+#### Kesalahan: "Unable to handle ...venv\Scripts\python.exe"
+- **Penyebab:** Lingkungan virtual belum diinisiasi atau mengalami kerusakan.
+- **Solusi:** Hapus direktori `venv/` dan buat ulang menggunakan perintah `python -m venv venv`.
+
+#### *Error* Pemanggilan Modul (*ModuleNotFoundError*) saat eksekusi `uvicorn`
+- **Penyebab:** Eksekusi dilakukan di luar lingkungan virtual atau paket belum dipasang.
+- **Solusi:** Pastikan `venv` telah aktif (ditandai dengan awalan `(venv)` di terminal) dan jalankan ulang instruksi `pip install -r requirements.txt`.
+
+---
+
+> 📌 **Catatan Rutin:** Pengembang diwajibkan untuk melaksanakan **aktivasi ulang** `venv` (`.\venv\Scripts\Activate`) setiap kali sesi terminal baru dibuka atau editor VS Code dimuat ulang.
 
 ---
 *Dokumen ini bersifat dinamis dan dapat diperbarui seiring dengan perkembangan iterasi proyek GradaTim.*
