@@ -5,6 +5,8 @@ from sqlalchemy import pool
 
 from alembic import context
 from app.core.config import settings
+from app.db.base import Base
+import app.models  # noqa: F401  (registrasi 7 tabel ke Base.metadata)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -19,9 +21,7 @@ if config.config_file_name:
 
 # add your model's MetaData object here
 # for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-target_metadata = None
+target_metadata = Base.metadata
 
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
