@@ -67,7 +67,7 @@ Solusi yang diusulkan adalah pengembangan platform AI Personal Manager, sebuah s
     </td>
     <td style="vertical-align:top; padding:8px;">
       <ul style="margin-bottom: 0; padding-left: 20px;">
-        <li>Beberapa fitur lanjutan harus berlangganan</li>
+        <li>Beberapa fitur lanjuhtan harus berlangganan</li>
         <li>Bergantung pada kalender (Google/Outlook)</li>
         <li>Tidak terlalu fokus ke breakdown goal jangka panjang, lebih ke manajemen waktu harian</li>
       </ul>
