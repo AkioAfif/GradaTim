@@ -1,13 +1,18 @@
 """Pydantic Settings (.env loader)"""
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./test.db"
     SECRET_KEY: str = "secret"
-    OPENAI_API_KEY: str | None = None
 
-    class Config:
-        env_file = ".env"
+    # LLM (Goal Decomposition) — provider apa pun yang kompatibel dengan OpenAI API.
+    # Default: Google Gemini. Ganti provider cukup lewat .env, tanpa ubah kode.
+    LLM_API_KEY: str | None = None
+    LLM_BASE_URL: str | None = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    LLM_MODEL: str = "gemini-3.5-flash-lite"
+
+    # extra="ignore": variabel lama di .env (mis. OPENAI_API_KEY) tidak bikin crash
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()
