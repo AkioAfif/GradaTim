@@ -12,7 +12,7 @@ Tujuan:
 import joblib
 import numpy as np
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 MODEL_PATH = Path(__file__).parent / "mood_model.pkl"
 
@@ -106,26 +106,54 @@ def predict_capacity(mood_answers: List[int]) -> Dict[str, Any]:
     }
 
 
+URGENCY_WEIGHT = 2.0
+
+
+def urgency_score(day_number: Optional[int], today_day: int) -> int:
+    """
+    Seberapa mendesak task, berdasarkan sisa hari menuju jadwalnya.
+        0 = tidak diketahui / masih jauh (>= 7 hari lagi)
+        1 = 3-6 hari lagi · 2 = 1-2 hari lagi · 3 = jadwalnya hari ini atau sudah lewat
+    """
+    if day_number is None:
+        return 0
+    days_left = day_number - today_day
+    if days_left <= 0:
+        return 3
+    if days_left <= 2:
+        return 2
+    if days_left <= 6:
+        return 1
+    return 0
+
+
 def filter_tasks_by_capacity(
     tasks: List[Dict],
     capacity_level: str,
-    max_tasks: int
+    max_tasks: int,
+    today_day: int = 1,
 ) -> List[Dict]:
     """
-    Filter dan sortir tasks sesuai kapasitas pengguna.
+    Pilih dan urutkan task hari ini sesuai kapasitas mood, urgensi, dan dependensi.
 
     Args:
-        tasks: List task dari database (harus punya field effort_level & impact_level)
+        tasks: List task. Field yang dipakai (semuanya opsional):
+            effort_level / impact_level: "low" | "medium" | "high" (default "medium")
+            day_number: hari jadwal task (untuk urgensi)
+            task_number + depends_on: prasyarat antar task
+            status: "done" → dianggap sudah selesai, tidak direkomendasikan lagi
         capacity_level: "LOW", "MEDIUM", atau "HIGH"
         max_tasks: Jumlah maksimal task yang direkomendasikan
+        today_day: Hari ke berapa sekarang (hari ke-1 = hari goal dibuat)
 
     Returns:
-        List task yang sudah difilter dan diurutkan berdasarkan kapasitas mood
+        List task terpilih, urut prioritas. Task selalu muncul SETELAH prasyaratnya,
+        dan hanya dipilih jika semua prasyaratnya sudah selesai atau ikut terpilih hari ini.
     """
     EFFORT_SCORE = {"low": 1, "medium": 2, "high": 3}
     IMPACT_SCORE = {"low": 1, "medium": 2, "high": 3}
 
-    def score_task(task: Dict) -> float:
+    def mood_fit(task: Dict) -> float:
         effort = EFFORT_SCORE.get(task.get("effort_level", "medium"), 2)
         impact = IMPACT_SCORE.get(task.get("impact_level", "medium"), 2)
 
@@ -139,5 +167,22 @@ def filter_tasks_by_capacity(
             # HIGH: dorong yang menantang
             return impact + effort
 
-    sorted_tasks = sorted(tasks, key=score_task, reverse=True)
-    return sorted_tasks[:max_tasks]
+    def score_task(task: Dict) -> float:
+        return mood_fit(task) + URGENCY_WEIGHT * urgency_score(task.get("day_number"), today_day)
+
+    done = {t.get("task_number") for t in tasks if t.get("status") == "done"}
+    remaining = [t for t in tasks if t.get("status") != "done"]
+    selected: List[Dict] = []
+    unlocked_by = done.copy()  # task_number yang sudah selesai / sudah terpilih hari ini
+
+    # Greedy: tiap putaran ambil task skor tertinggi yang semua prasyaratnya sudah terpenuhi
+    while remaining and len(selected) < max_tasks:
+        eligible = [t for t in remaining if all(d in unlocked_by for d in t.get("depends_on", []))]
+        if not eligible:
+            break
+        best = max(eligible, key=lambda t: (score_task(t), -(t.get("day_number") or 0)))
+        selected.append(best)
+        remaining.remove(best)
+        unlocked_by.add(best.get("task_number"))
+
+    return selected

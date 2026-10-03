@@ -1,0 +1,21 @@
+{
+  "model_type": "RandomForestClassifier",
+  "feature_columns": [
+    "q1_focus",
+    "q2_calm",
+    "q3_motivated",
+    "q4_sleep",
+    "q5_readiness",
+    "total_score"
+  ],
+  "label_map": {
+    "0": "LOW",
+    "1": "MEDIUM",
+    "2": "HIGH"
+  },
+  "accuracy": 0.87,
+  "cv_mean_accuracy": 0.887,
+  "n_estimators": 100,
+  "trained_on_samples": 1600,
+  "version": "1.0.0"
+}

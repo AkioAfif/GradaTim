@@ -158,7 +158,7 @@ axes[1].set_ylabel('Importance Score')
 axes[1].tick_params(axis='x', rotation=20)
 
 plt.tight_layout()
-plt.savefig('model_evaluation.png', dpi=150, bbox_inches='tight')
+plt.savefig(Path(__file__).parent / 'model_evaluation.png', dpi=150, bbox_inches='tight')
 print("Grafik disimpan ke 'model_evaluation.png'")
 
 
@@ -168,7 +168,7 @@ print("Grafik disimpan ke 'model_evaluation.png'")
 
 print("\n[SAVE] Langkah 6: Menyimpan model terlatih...")
 
-output_dir = Path(".")
+output_dir = Path(__file__).parent  # Simpan di folder ai_model/, sama dengan lokasi yang dibaca mood_predictor.py
 model_path = output_dir / "mood_model.pkl"
 joblib.dump(model, model_path)
 print(f"Model disimpan ke '{model_path}'")
@@ -184,7 +184,7 @@ metadata = {
     "trained_on_samples": len(X_train),
     "version": "1.0.0"
 }
-with open("model_metadata.json", "w") as f:
+with open(output_dir / "model_metadata.json", "w") as f:
     json.dump(metadata, f, indent=2)
 print("Metadata disimpan ke 'model_metadata.json'")
 
@@ -212,7 +212,7 @@ for answers, expected in test_cases:
     pred_idx = model.predict(features)[0]
     pred_proba = model.predict_proba(features)[0]
     pred_label = label_names[pred_idx]
-    match = "[OK]" if pred_label == expected else "⚠️"
+    match = "[OK]" if pred_label == expected else "[!!]"  # ASCII saja, emoji bikin crash di console Windows (cp1252)
     print(f"   {str(answers):<20} {pred_label:<12} {expected:<12} {match}")
 
 print("\n" + "=" * 60)
