@@ -2,20 +2,26 @@
 
 Fungsi murni tanpa database. Keputusan desain: docs/KEPUTUSAN_DESAIN_PENJADWALAN.md
 
-Tahap 1 (modul ini): menghitung slot waktu luang konkret.
+1. free_slots() — slot waktu luang konkret:
     jam luang mingguan (time_constraint)
     − kegiatan rutin mingguan (kuliah, gym, ...)
     − jam sibuk lain (agenda sekali-jalan, sesi task yang sudah terjadwal)
     = slot luang yang boleh diisi task
 
+2. schedule_tasks() — menempatkan task ke slot luang (FR-4), merata per hari, boleh dipecah
+   ke beberapa sesi, urut sesuai dependensi.
+
 Semua waktu memakai datetime lokal (WIB) tanpa timezone.
 """
 
-from dataclasses import dataclass
+import math
+from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
-from typing import Iterable
+from typing import Iterable, Optional
 
 MIN_SESSION_MINUTES = 15  # sisa slot di bawah ini tidak dipakai (lihat §7 dokumen desain)
+DAILY_CAP_TOLERANCE = 1.2  # batas beban harian = rata-rata × toleransi (D5: merata, tidak dipenuhi)
 
 
 @dataclass(frozen=True)
@@ -147,3 +153,166 @@ def average_daily_minutes(
     week_start = datetime(2024, 1, 1)  # hari Senin; tanggal apa pun boleh, yang penting satu minggu penuh
     slots = free_slots(availability, week_start, week_start + timedelta(days=7), routines, min_minutes=1)
     return sum(s.minutes for s in slots) // 7
+
+
+# ============================================================
+# PENEMPATAN TASK (FR-4)
+# ============================================================
+
+@dataclass(frozen=True)
+class TaskToSchedule:
+    """
+    task_number: id task (sama dengan task_number dari AI decomposer)
+    minutes: durasi total task
+    depends_on: task_number prasyarat. Prasyarat yang tidak ada di daftar yang sedang dijadwalkan
+        dianggap sudah selesai (mis. task minggu lalu).
+    earliest: task tidak boleh dimulai sebelum waktu ini (mis. dari day_number hasil AI)
+    """
+
+    task_number: int
+    minutes: int
+    depends_on: tuple[int, ...] = ()
+    earliest: Optional[datetime] = None
+
+
+@dataclass(frozen=True)
+class Session:
+    """Satu sesi kerja; satu task bisa punya beberapa sesi (keputusan D2)."""
+
+    task_number: int
+    interval: Interval
+
+
+@dataclass
+class ScheduleResult:
+    sessions: list[Session] = field(default_factory=list)
+    unscheduled: list[int] = field(default_factory=list)  # task_number yang tidak muat
+    daily_cap_minutes: int = 0
+
+    def daily_load(self) -> dict[date, int]:
+        load: dict[date, int] = defaultdict(int)
+        for s in self.sessions:
+            load[s.interval.start.date()] += s.interval.minutes
+        return dict(sorted(load.items()))
+
+
+def _dependency_order(tasks: list[TaskToSchedule]) -> tuple[list[TaskToSchedule], list[int]]:
+    """Urutan topologis (prasyarat dulu); seri diurutkan menurut earliest lalu task_number.
+    Task yang terlibat dependensi melingkar dikembalikan sebagai daftar kedua."""
+    known = {t.task_number for t in tasks}
+    pending = {t.task_number: {d for d in t.depends_on if d in known} for t in tasks}
+    by_number = {t.task_number: t for t in tasks}
+    ordered: list[TaskToSchedule] = []
+    while pending:
+        ready = [n for n, deps in pending.items() if not deps]
+        if not ready:
+            break
+        ready.sort(key=lambda n: (by_number[n].earliest or datetime.min, n))
+        for n in ready:
+            ordered.append(by_number[n])
+            del pending[n]
+        for deps in pending.values():
+            deps.difference_update(ready)
+    return ordered, sorted(pending)
+
+
+def _plan_task(
+    minutes: int,
+    ready_at: datetime,
+    free: list[Interval],
+    load: dict[date, int],
+    daily_cap: int,
+    min_session: int,
+) -> Optional[list[Interval]]:
+    """Cari potongan waktu untuk satu task tanpa mengubah state. None jika tidak muat."""
+    remaining = minutes
+    pieces: list[Interval] = []
+    planned_load: dict[date, int] = defaultdict(int)
+    for slot in free:
+        if remaining == 0:
+            break
+        start = max(slot.start, ready_at)
+        if start >= slot.end:
+            continue
+        day = start.date()
+        room = min(int((slot.end - start).total_seconds() // 60),
+                   daily_cap - load.get(day, 0) - planned_load[day])
+        take = min(remaining, room)
+        left = remaining - take
+        if 0 < left < min_session:
+            take = remaining - min_session  # jangan sisakan potongan terlalu kecil untuk sesi berikutnya
+        if take <= 0 or (take < min_session and take != remaining):
+            continue
+        pieces.append(Interval(start, start + timedelta(minutes=take)))
+        planned_load[day] += take
+        remaining -= take
+    return pieces if remaining == 0 else None
+
+
+def _schedule_with_cap(
+    ordered: list[TaskToSchedule], slots: list[Interval], daily_cap: int, min_session: int
+) -> ScheduleResult:
+    free = list(slots)
+    load: dict[date, int] = defaultdict(int)
+    finished_at: dict[int, datetime] = {}
+    result = ScheduleResult(daily_cap_minutes=daily_cap)
+    numbers = {t.task_number for t in ordered}
+
+    for task in ordered:
+        deps = [d for d in task.depends_on if d in numbers]
+        if any(d not in finished_at for d in deps):  # prasyarat tidak terjadwal → task ini juga tidak
+            result.unscheduled.append(task.task_number)
+            continue
+        ready_at = max([finished_at[d] for d in deps] + [task.earliest or datetime.min])
+        pieces = _plan_task(task.minutes, ready_at, free, load, daily_cap, min_session)
+        if pieces is None:
+            result.unscheduled.append(task.task_number)
+            continue
+        for p in pieces:
+            result.sessions.append(Session(task.task_number, p))
+            load[p.start.date()] += p.minutes
+        free = subtract_intervals(free, pieces)
+        finished_at[task.task_number] = pieces[-1].end
+
+    result.sessions.sort(key=lambda s: s.interval.start)
+    return result
+
+
+def schedule_tasks(
+    tasks: Iterable[TaskToSchedule],
+    slots: Iterable[Interval],
+    min_session: int = MIN_SESSION_MINUTES,
+) -> ScheduleResult:
+    """
+    Tempatkan task ke slot luang (hasil free_slots) secara otomatis — FR-4.
+
+    Aturan:
+    - Prasyarat dijadwalkan lebih dulu; task baru mulai setelah sesi terakhir prasyaratnya selesai.
+    - Task tidak dimulai sebelum `earliest`.
+    - Task boleh dipecah ke beberapa sesi (D2), masing-masing minimal `min_session` menit
+      (kecuali task itu sendiri lebih pendek).
+    - Beban per hari dibatasi agar merata (D5): rata-rata menit per hari yang punya slot luang
+      × DAILY_CAP_TOLERANCE. Jika batas itu membuat task tidak muat padahal masih ada waktu,
+      batas dinaikkan bertahap.
+    - Task yang tetap tidak muat (atau prasyaratnya tidak muat / dependensi melingkar) masuk
+      `unscheduled` — tidak pernah dijadwalkan melewati slot yang diberikan.
+    """
+    tasks = list(tasks)
+    slots = merge_intervals(slots)
+    ordered, cyclic = _dependency_order(tasks)
+    if not ordered or not slots:
+        return ScheduleResult(unscheduled=sorted(t.task_number for t in tasks))
+
+    total = sum(t.minutes for t in ordered)
+    days = {s.start.date() for s in slots}
+    max_day_free = max(sum(s.minutes for s in slots if s.start.date() == d) for d in days)
+    cap = math.ceil(total / len(days) * DAILY_CAP_TOLERANCE)
+
+    while True:
+        result = _schedule_with_cap(ordered, slots, cap, min_session)
+        if not result.unscheduled or cap >= max_day_free:
+            break
+        cap = min(max_day_free, cap + min_session)
+
+    result.unscheduled = sorted(result.unscheduled + cyclic)
+    return result
