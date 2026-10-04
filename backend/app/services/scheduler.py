@@ -2,14 +2,17 @@
 
 Fungsi murni tanpa database. Keputusan desain: docs/KEPUTUSAN_DESAIN_PENJADWALAN.md
 
-1. free_slots() — slot waktu luang konkret:
-    jam luang mingguan (time_constraint)
+1. free_slots() — slot waktu luang konkret (keputusan D10: jam luang tidak diinput user):
+    jam aktif harian
     − kegiatan rutin mingguan (kuliah, gym, ...)
     − jam sibuk lain (agenda sekali-jalan, sesi task yang sudah terjadwal)
     = slot luang yang boleh diisi task
 
 2. schedule_tasks() — menempatkan task ke slot luang (FR-4), merata per hari, boleh dipecah
    ke beberapa sesi, urut sesuai dependensi.
+
+3. find_conflicts() / validate_schedule() — deteksi bentrok jadwal (FR-5), mis. saat user
+   memindahkan sesi secara manual.
 
 Semua waktu memakai datetime lokal (WIB) tanpa timezone.
 """
@@ -30,11 +33,13 @@ class WeeklyWindow:
 
     weekday: 0=Senin ... 6=Minggu (sama dengan TimeConstraint.hari_dalam_minggu dan date.weekday()).
     Jika end <= start, rentang dianggap melewati tengah malam (mis. 22:00-01:00).
+    label: nama kegiatan (mis. "Kuliah"), dipakai untuk pesan bentrok. Tidak ikut perbandingan.
     """
 
     weekday: int
     start: time
     end: time
+    label: str = field(default="", compare=False)
 
     def __post_init__(self):
         if not 0 <= self.weekday <= 6:
@@ -67,10 +72,12 @@ class Interval:
         return int((self.end - self.start).total_seconds() // 60)
 
 
-def expand_weekly(windows: Iterable[WeeklyWindow], start: datetime, end: datetime) -> list[Interval]:
-    """Ubah rentang mingguan jadi interval konkret yang beririsan dengan [start, end), lalu gabungkan."""
+def _expand_weekly_each(
+    windows: Iterable[WeeklyWindow], start: datetime, end: datetime
+) -> list[tuple[WeeklyWindow, Interval]]:
+    """Setiap kemunculan konkret tiap rentang mingguan di [start, end), belum digabung."""
     windows = list(windows)
-    intervals = []
+    occurrences = []
     # mulai sehari sebelumnya agar rentang lewat tengah malam dari hari sebelumnya ikut terhitung
     day = start.date() - timedelta(days=1)
     while day <= end.date():
@@ -81,9 +88,14 @@ def expand_weekly(windows: Iterable[WeeklyWindow], start: datetime, end: datetim
             w_end = w_start + timedelta(minutes=w.minutes)
             clipped_start, clipped_end = max(w_start, start), min(w_end, end)
             if clipped_start < clipped_end:
-                intervals.append(Interval(clipped_start, clipped_end))
+                occurrences.append((w, Interval(clipped_start, clipped_end)))
         day += timedelta(days=1)
-    return merge_intervals(intervals)
+    return occurrences
+
+
+def expand_weekly(windows: Iterable[WeeklyWindow], start: datetime, end: datetime) -> list[Interval]:
+    """Ubah rentang mingguan jadi interval konkret yang beririsan dengan [start, end), lalu gabungkan."""
+    return merge_intervals(iv for _, iv in _expand_weekly_each(windows, start, end))
 
 
 def merge_intervals(intervals: Iterable[Interval]) -> list[Interval]:
@@ -129,7 +141,7 @@ def free_slots(
     Slot luang konkret di antara [start, end) yang boleh diisi task.
 
     Args:
-        availability: jam luang mingguan user (time_constraint)
+        availability: jam yang boleh dipakai (D10: jam aktif harian, bukan input user)
         start: biasanya "sekarang" — slot sebelum ini tidak dipakai
         end: biasanya deadline goal / akhir minggu perencanaan
         routines: kegiatan rutin mingguan (kuliah, gym, ...) → dianggap sibuk
@@ -316,3 +328,78 @@ def schedule_tasks(
 
     result.unscheduled = sorted(result.unscheduled + cyclic)
     return result
+
+
+# ============================================================
+# DETEKSI BENTROK (FR-5)
+# ============================================================
+
+@dataclass(frozen=True)
+class BusyBlock:
+    """Jam sibuk yang tidak boleh ditabrak.
+
+    kind: "rutin" (kegiatan rutin mingguan), "agenda" (acara sekali-jalan), atau "task" (sesi task lain)
+    label: nama yang ditampilkan ke user (mis. "Kuliah", "Task #3")
+    """
+
+    interval: Interval
+    kind: str
+    label: str
+
+
+@dataclass(frozen=True)
+class Conflict:
+    candidate: Interval  # jadwal yang dicek
+    blocking: BusyBlock  # yang ditabrak
+    overlap: Interval  # bagian yang tumpang tindih
+
+    @property
+    def message(self) -> str:
+        return (f"Bentrok dengan {self.blocking.label} "
+                f"({self.overlap.start:%d/%m %H:%M}-{self.overlap.end:%H:%M}, {self.overlap.minutes} menit)")
+
+
+def busy_blocks(
+    start: datetime,
+    end: datetime,
+    routines: Iterable[WeeklyWindow] = (),
+    agendas: Iterable[BusyBlock] = (),
+    sessions: Iterable[Session] = (),
+) -> list[BusyBlock]:
+    """Kumpulkan semua jam sibuk di [start, end) dari kegiatan rutin, agenda, dan sesi task."""
+    blocks = [BusyBlock(iv, "rutin", w.label or "kegiatan rutin")
+              for w, iv in _expand_weekly_each(routines, start, end)]
+    blocks += [a for a in agendas if a.interval.start < end and a.interval.end > start]
+    blocks += [BusyBlock(s.interval, "task", f"Task #{s.task_number}")
+               for s in sessions if s.interval.start < end and s.interval.end > start]
+    return sorted(blocks, key=lambda b: b.interval.start)
+
+
+def find_conflicts(candidate: Interval, blocks: Iterable[BusyBlock]) -> list[Conflict]:
+    """
+    Cek apakah satu jadwal bertabrakan dengan jam sibuk mana pun (FR-5).
+    Bersentuhan di ujung (mis. 19:00-20:00 dan 20:00-21:00) tidak dianggap bentrok.
+
+    Untuk memindahkan sesi secara manual: kirim `blocks` tanpa sesi yang sedang dipindah,
+    supaya sesi itu tidak dianggap bentrok dengan posisi lamanya.
+    """
+    conflicts = []
+    for b in blocks:
+        start, end = max(candidate.start, b.interval.start), min(candidate.end, b.interval.end)
+        if start < end:
+            conflicts.append(Conflict(candidate, b, Interval(start, end)))
+    return sorted(conflicts, key=lambda c: c.overlap.start)
+
+
+def validate_schedule(sessions: Iterable[Session], blocks: Iterable[BusyBlock] = ()) -> list[Conflict]:
+    """
+    Cek seluruh jadwal: bentrok antar-sesi task, dan bentrok sesi dengan jam sibuk lain.
+    Hasil kosong = jadwal aman (tidak ada double booking).
+    """
+    sessions = sorted(sessions, key=lambda s: s.interval.start)
+    blocks = list(blocks)
+    conflicts = []
+    for i, s in enumerate(sessions):
+        others = [BusyBlock(o.interval, "task", f"Task #{o.task_number}") for o in sessions[i + 1:]]
+        conflicts += find_conflicts(s.interval, others + blocks)
+    return conflicts

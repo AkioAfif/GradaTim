@@ -5,15 +5,20 @@ from datetime import datetime, time
 import pytest
 
 from app.services.scheduler import (
+    BusyBlock,
     Interval,
+    Session,
     TaskToSchedule,
     WeeklyWindow,
     average_daily_minutes,
+    busy_blocks,
     expand_weekly,
+    find_conflicts,
     free_slots,
     merge_intervals,
     schedule_tasks,
     subtract_intervals,
+    validate_schedule,
 )
 
 # 5 Oktober 2026 = Senin
@@ -248,3 +253,78 @@ def test_schedule_end_to_end_with_free_slots():
 def test_schedule_empty_inputs():
     assert schedule_tasks([], evening_slots()).sessions == []
     assert schedule_tasks([T(1, 30)], []).unscheduled == [1]
+
+
+# ------------------------------------------------------------
+# DETEKSI BENTROK (FR-5)
+# ------------------------------------------------------------
+
+KULIAH = WeeklyWindow(MON, time(10), time(12), label="Kuliah")
+RAPAT = BusyBlock(iv(6, 19, 20), "agenda", "Rapat himpunan")
+
+
+def test_weekly_window_label_not_part_of_equality():
+    assert WeeklyWindow(MON, time(10), time(12), label="Kuliah") == WeeklyWindow(MON, time(10), time(12))
+
+
+def test_busy_blocks_collects_all_sources_with_labels():
+    sessions = [Session(3, iv(7, 19, 20))]
+    blocks = busy_blocks(dt(5, 0), dt(12, 0), [KULIAH], [RAPAT], sessions)
+    assert [(b.kind, b.label) for b in blocks] == [
+        ("rutin", "Kuliah"), ("agenda", "Rapat himpunan"), ("task", "Task #3"),
+    ]
+
+
+def test_busy_blocks_ignores_items_outside_range():
+    blocks = busy_blocks(dt(7, 0), dt(8, 0), [KULIAH], [RAPAT], [Session(1, iv(9, 19, 20))])
+    assert blocks == []
+
+
+def test_find_conflicts_reports_overlap_and_label():
+    blocks = busy_blocks(dt(5, 0), dt(12, 0), [KULIAH])
+    conflicts = find_conflicts(Interval(dt(5, 11), dt(5, 13)), blocks)
+    assert len(conflicts) == 1
+    assert conflicts[0].overlap == iv(5, 11, 12)
+    assert conflicts[0].message == "Bentrok dengan Kuliah (05/10 11:00-12:00, 60 menit)"
+
+
+def test_find_conflicts_touching_is_not_conflict():
+    blocks = busy_blocks(dt(5, 0), dt(12, 0), [KULIAH])
+    assert find_conflicts(iv(5, 12, 13), blocks) == []
+    assert find_conflicts(iv(5, 9, 10), blocks) == []
+
+
+def test_find_conflicts_multiple_blocks():
+    blocks = [BusyBlock(iv(6, 19, 20), "agenda", "A"), BusyBlock(iv(6, 20, 21), "task", "Task #1")]
+    conflicts = find_conflicts(Interval(dt(6, 19, 30), dt(6, 20, 30)), blocks)
+    assert [c.blocking.label for c in conflicts] == ["A", "Task #1"]
+
+
+def test_manual_move_excluding_own_session():
+    """User memindahkan sesi Task #1 sedikit lebih maju — tidak boleh bentrok dengan posisi lamanya."""
+    sessions = [Session(1, iv(6, 19, 20)), Session(2, iv(6, 20, 21))]
+    moving = sessions[0]
+    others = [s for s in sessions if s is not moving]
+    blocks = busy_blocks(dt(5, 0), dt(12, 0), sessions=others)
+    assert find_conflicts(Interval(dt(6, 18, 30), dt(6, 19, 30)), blocks) == []
+    assert [c.blocking.label for c in find_conflicts(Interval(dt(6, 19, 30), dt(6, 20, 30)), blocks)] == ["Task #2"]
+
+
+def test_validate_schedule_detects_double_booking():
+    sessions = [Session(1, iv(6, 19, 20)), Session(2, Interval(dt(6, 19, 30), dt(6, 20, 30))), Session(3, iv(7, 19, 20))]
+    conflicts = validate_schedule(sessions, [RAPAT])
+    labels = sorted(c.blocking.label for c in conflicts)
+    # Task #1 vs Task #2, Task #1 vs Rapat, Task #2 vs Rapat
+    assert labels == ["Rapat himpunan", "Rapat himpunan", "Task #2"]
+
+
+def test_auto_schedule_has_no_conflicts():
+    """Hasil penjadwal otomatis (FR-4) harus selalu lolos validasi bentrok (FR-5)."""
+    start, end = dt(5, 0), dt(12, 0)
+    existing = [Session(99, iv(5, 13, 14))]  # sesi dari goal lain
+    blocks = busy_blocks(start, end, [KULIAH], [RAPAT], existing)
+    slots = free_slots([WeeklyWindow(d, time(8), time(21)) for d in range(7)], start, end,
+                       busy=[b.interval for b in blocks])
+    result = schedule_tasks([T(n, 60, deps=[n - 1] if n > 1 else []) for n in range(1, 11)], slots)
+    assert result.unscheduled == []
+    assert validate_schedule(result.sessions, blocks) == []
