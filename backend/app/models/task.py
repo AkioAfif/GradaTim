@@ -20,7 +20,17 @@ class Task(Base):
     deadline: Mapped[Optional[datetime]] = mapped_column(DateTime)
     durasi_estimasi: Mapped[Optional[int]] = mapped_column(Integer)  # menit
     status: Mapped[str] = mapped_column(String(20), default="pending")
+    tingkat_effort: Mapped[Optional[str]] = mapped_column(String(10))  # low | medium | high
+    tingkat_impact: Mapped[Optional[str]] = mapped_column(String(10))  # low | medium | high
 
     milestone: Mapped["Milestone"] = relationship(back_populates="tasks")
     parent_task: Mapped[Optional["Task"]] = relationship(back_populates="sub_tasks", remote_side=[id_task])
     sub_tasks: Mapped[list["Task"]] = relationship(back_populates="parent_task", cascade="all, delete-orphan")
+    # prasyarat: task lain yang harus selesai dulu; dependen: task yang menunggu task ini
+    prasyarat: Mapped[list["TaskDependency"]] = relationship(
+        back_populates="task", foreign_keys="TaskDependency.id_task", cascade="all, delete-orphan"
+    )
+    dependen: Mapped[list["TaskDependency"]] = relationship(
+        back_populates="task_prasyarat", foreign_keys="TaskDependency.id_task_prasyarat", cascade="all, delete-orphan"
+    )
+    jadwal: Mapped[list["JadwalTask"]] = relationship(back_populates="task", cascade="all, delete-orphan")

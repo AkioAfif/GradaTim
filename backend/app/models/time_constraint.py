@@ -14,6 +14,7 @@ class TimeConstraint(Base):
 
     id_constraint: Mapped[int] = mapped_column(primary_key=True, index=True)
     id_user: Mapped[int] = mapped_column(ForeignKey("user.id_user"), index=True)
+    nama: Mapped[str] = mapped_column(String(100))  # kegiatan rutin mingguan: Kuliah, Gym, ...
     hari_dalam_minggu: Mapped[int] = mapped_column(Integer)  # 0=Senin ... 6=Minggu
     waktu_mulai: Mapped[time] = mapped_column(Time)
     waktu_selesai: Mapped[time] = mapped_column(Time)
