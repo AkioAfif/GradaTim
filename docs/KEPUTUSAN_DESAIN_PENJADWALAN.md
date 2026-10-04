@@ -104,11 +104,31 @@ Jika user melewatkan (skip) task hari ini, ada dua kemungkinan konsekuensi:
 Berlaku untuk implementasi `app/services/scheduler.py` kecuali diubah:
 
 - Potongan sesi minimal **15 menit**; sisa slot lebih kecil dari itu dilewati.
+- Task **tidak dipecah hanya untuk mengisi batas harian**; dipecah hanya jika slot habis (mis. terpotong kegiatan rutin) atau task lebih besar dari batas harian.
 - Task tidak dijadwalkan sebelum **semua prasyaratnya** (`depends_on`) selesai dijadwalkan.
-- Slot yang sudah terisi task dari **goal lain** milik user yang sama juga dianggap sibuk.
+- Slot yang sudah terisi task dari **goal lain** milik user yang sama dianggap sibuk, dan bebannya ikut dihitung dalam batas harian (`existing_load`).
 - Task yang tidak muat sebelum deadline **dilaporkan terpisah**, tidak diam-diam dijadwalkan melewati deadline.
 - Zona waktu lokal (WIB), tanpa konversi zona waktu.
 - Karena task boleh dipecah (D2), satu task bisa punya beberapa sesi → 💡 butuh tabel `jadwal_task` (`id_task`, `waktu_mulai`, `waktu_selesai`, `status`). Tabel `task` saat ini hanya punya satu kolom `deadline`.
+
+### Status implementasi (`backend/app/services/scheduler.py`)
+
+| Fungsi | Memenuhi | Keputusan |
+| :--- | :--- | :--- |
+| `free_slots()` | slot luang = jam aktif − rutin − agenda − sesi lain | D3, D9, D10 |
+| `average_daily_minutes()` | pengganti input manual `menit_harian` (belum dihubungkan ke decomposer) | D6 |
+| `schedule_tasks()` | penjadwalan otomatis, merata, boleh dipecah, urut dependensi | FR-4, D2, D5 |
+| `busy_blocks()`, `find_conflicts()`, `validate_schedule()` | deteksi bentrok, termasuk saat sesi dipindah manual | FR-5 |
+| `replan()` | jadwal ulang sesi terlewat & task yang ditunda karena mood, dalam minggu yang sama | FR-11, D7 |
+
+Demo: `python scripts/demo_jadwal.py` (dari folder `backend/`) — kalender 2 minggu + skenario re-planning, tanpa memanggil LLM.
+
+### Keterbatasan yang diketahui
+
+- **Sesi selalu ditaruh di slot paling awal dalam sehari** (mis. tepat setelah kuliah selesai, atau jam 08:00 di akhir pekan). Belum ada preferensi waktu (pagi/sore/malam). ❓ Perlu fitur preferensi jam belajar?
+- **Batas harian dinaikkan untuk semua hari sekaligus** jika ada task yang tidak muat. Dengan rantai dependensi panjang (1 task per hari), ini bisa membuat beberapa hari terisi 2 task dan hari-hari terakhir kosong, padahal cukup satu hari yang ditambah.
+- **Jam aktif harian** masih konstanta di kode/demo (mis. 08:00–21:00), belum ada sumber resminya (D10).
+- Hasil AI decomposer masih memakai `day_number` (hari ke-N) sebagai batas paling awal; setelah decomposer diubah ke target mingguan (D4, D11), cukup "awal minggu".
 
 ## 8. Perlu dibahas dengan tim
 
@@ -127,3 +147,4 @@ Untuk Annora (PM/UX):
 | :--- | :--- |
 | 4 Okt 2026 | Dokumen dibuat (D1–D9) |
 | 4 Okt 2026 | Hasil diskusi grup: D10 (tanpa input jam luang terpisah), D11 (task dirinci per minggu), D12 (user memilih konsekuensi skip). `time_constraint` diusulkan dipakai ulang untuk kegiatan rutin. |
+| 4 Okt 2026 | Penjadwal FR-4, FR-5, FR-11 selesai diimplementasi (§7: status, keterbatasan). Aturan baru: task tidak dipecah hanya demi batas harian. |

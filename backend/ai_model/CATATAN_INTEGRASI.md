@@ -54,15 +54,18 @@ class TaskDependency(Base):
 
 ## 4. Hal teknis lain
 
-- **File model `mood_model.pkl` tidak di-commit.** Generate dengan:
+- **File model `mood_model.pkl` sudah di-commit**, jadi backend & Docker langsung bisa memakainya.
+  Untuk melatih ulang:
   ```bash
   pip install -r ai_model/requirements-train.txt
   python ai_model/train_model.py
   ```
-  Untuk Docker nanti perlu diputuskan: commit `.pkl`-nya, atau training saat build image.
   Versi `scikit-learn` saat training dan saat runtime sebaiknya sama (pickle tidak dijamin kompatibel antar versi).
-- `menit_harian` di `GoalDecompositionRequest` untuk sementara diisi manual.
-  Idealnya dihitung dari `time_constraint` user (total durasi `waktu_mulai`–`waktu_selesai` per hari).
+- `menit_harian` di `GoalDecompositionRequest` untuk sementara diisi manual. Sesuai keputusan D6/D10
+  nanti diisi dari `scheduler.average_daily_minutes(jam_aktif, kegiatan_rutin)`.
+- **Penjadwalan:** tabel yang dibutuhkan penjadwal (`jadwal_task`, `agenda`, kegiatan rutin lewat
+  `time_constraint` + kolom `nama`) dan level target mingguan dijelaskan di
+  `docs/KEPUTUSAN_DESAIN_PENJADWALAN.md` §3, §4, §7.
 - LLM default sekarang **Google Gemini** (free tier), via OpenAI-compatible API. Diatur lewat
   `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` di `.env` (menggantikan `OPENAI_API_KEY`).
   Bagian 8 di `docs/PROJECT_SPECIFICATIONS.md` masih menyebut `OPENAI_API_KEY` — perlu disesuaikan.
