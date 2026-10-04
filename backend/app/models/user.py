@@ -20,3 +20,4 @@ class User(Base):
     goals: Mapped[list["Goal"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     time_constraints: Mapped[list["TimeConstraint"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     mood_questionnaires: Mapped[list["MoodQuestionnaire"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    agenda: Mapped[list["Agenda"]] = relationship(back_populates="user", cascade="all, delete-orphan")

@@ -1,8 +1,8 @@
-"""initial schema from ERD
+"""initial schema from ERD v2
 
-Revision ID: e8313ed1427e
+Revision ID: bc925661c16c
 Revises: 
-Create Date: 2026-09-25 13:33:28.593277
+Create Date: 2026-10-04 15:51:57.358489
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'e8313ed1427e'
+revision: str = 'bc925661c16c'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -29,6 +29,17 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_user_email'), 'user', ['email'], unique=True)
     op.create_index(op.f('ix_user_id_user'), 'user', ['id_user'], unique=False)
+    op.create_table('agenda',
+    sa.Column('id_agenda', sa.Integer(), nullable=False),
+    sa.Column('id_user', sa.Integer(), nullable=False),
+    sa.Column('nama', sa.String(length=100), nullable=False),
+    sa.Column('waktu_mulai', sa.DateTime(), nullable=False),
+    sa.Column('waktu_selesai', sa.DateTime(), nullable=False),
+    sa.ForeignKeyConstraint(['id_user'], ['user.id_user'], ),
+    sa.PrimaryKeyConstraint('id_agenda')
+    )
+    op.create_index(op.f('ix_agenda_id_agenda'), 'agenda', ['id_agenda'], unique=False)
+    op.create_index(op.f('ix_agenda_id_user'), 'agenda', ['id_user'], unique=False)
     op.create_table('goal',
     sa.Column('id_goal', sa.Integer(), nullable=False),
     sa.Column('id_user', sa.Integer(), nullable=False),
@@ -54,6 +65,7 @@ def upgrade() -> None:
     op.create_table('time_constraint',
     sa.Column('id_constraint', sa.Integer(), nullable=False),
     sa.Column('id_user', sa.Integer(), nullable=False),
+    sa.Column('nama', sa.String(length=100), nullable=False),
     sa.Column('hari_dalam_minggu', sa.Integer(), nullable=False),
     sa.Column('waktu_mulai', sa.Time(), nullable=False),
     sa.Column('waktu_selesai', sa.Time(), nullable=False),
@@ -65,16 +77,20 @@ def upgrade() -> None:
     op.create_table('milestone',
     sa.Column('id_milestone', sa.Integer(), nullable=False),
     sa.Column('id_goal', sa.Integer(), nullable=False),
+    sa.Column('id_parent_milestone', sa.Integer(), nullable=True),
     sa.Column('judul_milestone', sa.String(length=255), nullable=False),
     sa.Column('deskripsi', sa.Text(), nullable=True),
     sa.Column('deadline', sa.DateTime(), nullable=True),
     sa.Column('urutan', sa.Integer(), nullable=False),
     sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('tipe', sa.String(length=10), nullable=True),
     sa.ForeignKeyConstraint(['id_goal'], ['goal.id_goal'], ),
+    sa.ForeignKeyConstraint(['id_parent_milestone'], ['milestone.id_milestone'], ),
     sa.PrimaryKeyConstraint('id_milestone')
     )
     op.create_index(op.f('ix_milestone_id_goal'), 'milestone', ['id_goal'], unique=False)
     op.create_index(op.f('ix_milestone_id_milestone'), 'milestone', ['id_milestone'], unique=False)
+    op.create_index(op.f('ix_milestone_id_parent_milestone'), 'milestone', ['id_parent_milestone'], unique=False)
     op.create_table('questionnaire_answer',
     sa.Column('id_answer', sa.Integer(), nullable=False),
     sa.Column('id_questionnaire', sa.Integer(), nullable=False),
@@ -94,6 +110,8 @@ def upgrade() -> None:
     sa.Column('deadline', sa.DateTime(), nullable=True),
     sa.Column('durasi_estimasi', sa.Integer(), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=False),
+    sa.Column('tingkat_effort', sa.String(length=10), nullable=True),
+    sa.Column('tingkat_impact', sa.String(length=10), nullable=True),
     sa.ForeignKeyConstraint(['id_milestone'], ['milestone.id_milestone'], ),
     sa.ForeignKeyConstraint(['id_parent_task'], ['task.id_task'], ),
     sa.PrimaryKeyConstraint('id_task')
@@ -101,11 +119,36 @@ def upgrade() -> None:
     op.create_index(op.f('ix_task_id_milestone'), 'task', ['id_milestone'], unique=False)
     op.create_index(op.f('ix_task_id_parent_task'), 'task', ['id_parent_task'], unique=False)
     op.create_index(op.f('ix_task_id_task'), 'task', ['id_task'], unique=False)
+    op.create_table('jadwal_task',
+    sa.Column('id_jadwal', sa.Integer(), nullable=False),
+    sa.Column('id_task', sa.Integer(), nullable=False),
+    sa.Column('waktu_mulai', sa.DateTime(), nullable=False),
+    sa.Column('waktu_selesai', sa.DateTime(), nullable=False),
+    sa.Column('status', sa.String(length=20), nullable=False),
+    sa.ForeignKeyConstraint(['id_task'], ['task.id_task'], ),
+    sa.PrimaryKeyConstraint('id_jadwal')
+    )
+    op.create_index(op.f('ix_jadwal_task_id_jadwal'), 'jadwal_task', ['id_jadwal'], unique=False)
+    op.create_index(op.f('ix_jadwal_task_id_task'), 'jadwal_task', ['id_task'], unique=False)
+    op.create_table('task_dependency',
+    sa.Column('id_task', sa.Integer(), nullable=False),
+    sa.Column('id_task_prasyarat', sa.Integer(), nullable=False),
+    sa.CheckConstraint('id_task <> id_task_prasyarat', name='ck_task_dependency_bukan_diri_sendiri'),
+    sa.ForeignKeyConstraint(['id_task'], ['task.id_task'], ),
+    sa.ForeignKeyConstraint(['id_task_prasyarat'], ['task.id_task'], ),
+    sa.PrimaryKeyConstraint('id_task', 'id_task_prasyarat')
+    )
+    op.create_index(op.f('ix_task_dependency_id_task_prasyarat'), 'task_dependency', ['id_task_prasyarat'], unique=False)
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
     # ### commands auto generated by Alembic - please adjust! ###
+    op.drop_index(op.f('ix_task_dependency_id_task_prasyarat'), table_name='task_dependency')
+    op.drop_table('task_dependency')
+    op.drop_index(op.f('ix_jadwal_task_id_task'), table_name='jadwal_task')
+    op.drop_index(op.f('ix_jadwal_task_id_jadwal'), table_name='jadwal_task')
+    op.drop_table('jadwal_task')
     op.drop_index(op.f('ix_task_id_task'), table_name='task')
     op.drop_index(op.f('ix_task_id_parent_task'), table_name='task')
     op.drop_index(op.f('ix_task_id_milestone'), table_name='task')
@@ -113,6 +156,7 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_questionnaire_answer_id_questionnaire'), table_name='questionnaire_answer')
     op.drop_index(op.f('ix_questionnaire_answer_id_answer'), table_name='questionnaire_answer')
     op.drop_table('questionnaire_answer')
+    op.drop_index(op.f('ix_milestone_id_parent_milestone'), table_name='milestone')
     op.drop_index(op.f('ix_milestone_id_milestone'), table_name='milestone')
     op.drop_index(op.f('ix_milestone_id_goal'), table_name='milestone')
     op.drop_table('milestone')
@@ -125,6 +169,9 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_goal_id_user'), table_name='goal')
     op.drop_index(op.f('ix_goal_id_goal'), table_name='goal')
     op.drop_table('goal')
+    op.drop_index(op.f('ix_agenda_id_user'), table_name='agenda')
+    op.drop_index(op.f('ix_agenda_id_agenda'), table_name='agenda')
+    op.drop_table('agenda')
     op.drop_index(op.f('ix_user_id_user'), table_name='user')
     op.drop_index(op.f('ix_user_email'), table_name='user')
     op.drop_table('user')
