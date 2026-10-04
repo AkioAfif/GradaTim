@@ -16,6 +16,7 @@ from app.services.scheduler import (
     find_conflicts,
     free_slots,
     merge_intervals,
+    replan,
     schedule_tasks,
     subtract_intervals,
     validate_schedule,
@@ -328,3 +329,99 @@ def test_auto_schedule_has_no_conflicts():
     result = schedule_tasks([T(n, 60, deps=[n - 1] if n > 1 else []) for n in range(1, 11)], slots)
     assert result.unscheduled == []
     assert validate_schedule(result.sessions, blocks) == []
+
+
+# ------------------------------------------------------------
+# BEBAN YANG SUDAH ADA (existing_load)
+# ------------------------------------------------------------
+
+def test_schedule_existing_load_pushes_to_lighter_day():
+    # Senin sudah terisi 90 menit dari goal lain (slotnya sudah tidak ada di daftar),
+    # jadi task baru sebaiknya ke Selasa walaupun Senin masih ada sisa slot
+    slots = [Interval(dt(5, 20, 30), dt(5, 21)), iv(6, 19, 21)]
+    result = schedule_tasks([T(1, 30)], slots, existing_load={dt(5, 0).date(): 90})
+    assert sessions_of(result, 1)[0].start == dt(6, 19)
+
+
+# ------------------------------------------------------------
+# RE-PLANNING (FR-11)
+# ------------------------------------------------------------
+
+WEEK_SLOTS = evening_slots(days=range(5, 12))  # Senin 5 - Minggu 11, 19:00-21:00
+
+
+def S(number, interval, done=False):
+    return Session(number, interval, done)
+
+
+def test_replan_moves_missed_session_after_now():
+    sessions = [S(1, iv(5, 19, 20)), S(2, iv(8, 19, 20))]
+    now = dt(6, 12)  # Selasa siang; sesi Senin terlewat
+    result = replan(sessions, WEEK_SLOTS, now)
+    moved = [s for s in result.sessions if s.task_number == 1]
+    assert result.rescheduled == [1]
+    assert all(s.interval.start >= now for s in moved)
+    assert sum(s.interval.minutes for s in moved) == 60
+    assert S(2, iv(8, 19, 20)) in result.sessions  # task lain tidak digeser
+
+
+def test_replan_keeps_done_sessions():
+    sessions = [S(1, iv(5, 19, 20), done=True)]
+    result = replan(sessions, WEEK_SLOTS, dt(6, 12))
+    assert result.sessions == sessions
+    assert result.rescheduled == []
+
+
+def test_replan_nothing_missed_returns_same_schedule():
+    sessions = [S(1, iv(7, 19, 20)), S(2, iv(8, 19, 20))]
+    result = replan(sessions, WEEK_SLOTS, dt(6, 12))
+    assert result.sessions == sessions
+    assert result.rescheduled == [] and result.unscheduled == []
+
+
+def test_replan_moves_dependents_after_prerequisite():
+    # Task 2 bergantung pada task 1. Task 1 (Senin) terlewat; sesi task 2 di Rabu
+    # harus ikut digeser supaya tetap setelah task 1 yang baru.
+    sessions = [S(1, iv(5, 19, 21)), S(2, iv(7, 19, 20))]
+    result = replan(sessions, WEEK_SLOTS, dt(6, 12), depends_on={2: (1,)})
+    end_1 = max(s.interval.end for s in result.sessions if s.task_number == 1)
+    start_2 = min(s.interval.start for s in result.sessions if s.task_number == 2)
+    assert result.rescheduled == [1, 2]
+    assert start_2 >= end_1
+
+
+def test_replan_waits_for_kept_prerequisite():
+    # Task 3 bergantung pada task 1 (terlewat) DAN task 2 (tetap di Jumat).
+    sessions = [S(1, iv(5, 19, 20)), S(2, iv(9, 19, 20)), S(3, iv(10, 19, 20))]
+    result = replan(sessions, WEEK_SLOTS, dt(6, 12), depends_on={3: (1, 2)})
+    start_3 = min(s.interval.start for s in result.sessions if s.task_number == 3)
+    assert S(2, iv(9, 19, 20)) in result.sessions
+    assert start_3 >= dt(9, 20)
+
+
+def test_replan_deferred_by_mood_moves_to_tomorrow():
+    # Selasa pagi user mood LOW, task 2 (terjadwal Selasa malam) ditunda
+    sessions = [S(1, iv(6, 19, 20)), S(2, iv(6, 20, 21))]
+    result = replan(sessions, WEEK_SLOTS, dt(6, 7), deferred=[2])
+    moved = [s for s in result.sessions if s.task_number == 2]
+    assert result.rescheduled == [2]
+    assert all(s.interval.start >= dt(7, 0) for s in moved)
+    assert S(1, iv(6, 19, 20)) in result.sessions
+
+
+def test_replan_reports_when_week_is_full():
+    # Sisa minggu cuma Minggu 19-21 (120 menit), padahal ada 180 menit terlewat
+    sessions = [S(1, iv(9, 19, 21)), S(2, Interval(dt(10, 19), dt(10, 20)))]
+    result = replan(sessions, WEEK_SLOTS, dt(11, 0), depends_on={2: (1,)})
+    assert result.rescheduled == [1]
+    assert result.unscheduled == [2]
+
+
+def test_replan_result_has_no_conflicts():
+    kuliah = WeeklyWindow(WED, time(19), time(20), label="Kuliah")
+    start, end = dt(5, 0), dt(12, 0)
+    slots = free_slots([WeeklyWindow(d, time(19), time(22)) for d in range(7)], start, end, [kuliah])
+    sessions = [S(n, iv(5 + n % 3, 20, 21)) for n in range(1, 4)]  # Senin-Rabu
+    result = replan(sessions, slots, dt(7, 21, 30), depends_on={2: (1,), 3: (2,)})
+    assert result.unscheduled == []
+    assert validate_schedule(result.sessions, busy_blocks(start, end, [kuliah])) == []
