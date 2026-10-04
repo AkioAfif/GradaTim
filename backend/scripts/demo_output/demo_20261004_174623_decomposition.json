@@ -1,0 +1,182 @@
+{
+  "goal_title": "Belajar Docker & CI/CD untuk project kuliah",
+  "estimated_total_days": 14,
+  "milestones": [
+    {
+      "milestone_title": "Dasar Docker & Containerisasi",
+      "order": 1,
+      "tasks": [
+        {
+          "task_number": 1,
+          "depends_on": [],
+          "task_title": "Install Docker Desktop & verifikasi CLI",
+          "day_number": 1,
+          "estimated_minutes": 45,
+          "effort_level": "medium",
+          "impact_level": "high"
+        },
+        {
+          "task_number": 2,
+          "depends_on": [
+            1
+          ],
+          "task_title": "Pelajari konsep dasar container vs VM",
+          "day_number": 2,
+          "estimated_minutes": 30,
+          "effort_level": "low",
+          "impact_level": "medium"
+        },
+        {
+          "task_number": 3,
+          "depends_on": [
+            1
+          ],
+          "task_title": "Jalankan container pertama hello-world",
+          "day_number": 3,
+          "estimated_minutes": 30,
+          "effort_level": "low",
+          "impact_level": "high"
+        },
+        {
+          "task_number": 4,
+          "depends_on": [
+            3
+          ],
+          "task_title": "Praktik perintah dasar Docker run ps stop",
+          "day_number": 4,
+          "estimated_minutes": 45,
+          "effort_level": "medium",
+          "impact_level": "high"
+        }
+      ]
+    },
+    {
+      "milestone_title": "Dockerisasi Project Python",
+      "order": 2,
+      "tasks": [
+        {
+          "task_number": 5,
+          "depends_on": [
+            4
+          ],
+          "task_title": "Buat file requirements.txt untuk project Python",
+          "day_number": 5,
+          "estimated_minutes": 30,
+          "effort_level": "low",
+          "impact_level": "medium"
+        },
+        {
+          "task_number": 6,
+          "depends_on": [
+            5
+          ],
+          "task_title": "Tulis Dockerfile untuk aplikasi Python",
+          "day_number": 6,
+          "estimated_minutes": 60,
+          "effort_level": "medium",
+          "impact_level": "high"
+        },
+        {
+          "task_number": 7,
+          "depends_on": [
+            6
+          ],
+          "task_title": "Build image Docker project Python",
+          "day_number": 7,
+          "estimated_minutes": 45,
+          "effort_level": "medium",
+          "impact_level": "high"
+        },
+        {
+          "task_number": 8,
+          "depends_on": [
+            7
+          ],
+          "task_title": "Jalankan container dari image project Python",
+          "day_number": 8,
+          "estimated_minutes": 45,
+          "effort_level": "medium",
+          "impact_level": "high"
+        }
+      ]
+    },
+    {
+      "milestone_title": "Manajemen Multiple Container",
+      "order": 3,
+      "tasks": [
+        {
+          "task_number": 9,
+          "depends_on": [
+            8
+          ],
+          "task_title": "Pelajari dasar Docker Compose",
+          "day_number": 9,
+          "estimated_minutes": 30,
+          "effort_level": "low",
+          "impact_level": "medium"
+        },
+        {
+          "task_number": 10,
+          "depends_on": [
+            9
+          ],
+          "task_title": "Buat file docker-compose.yml untuk aplikasi",
+          "day_number": 10,
+          "estimated_minutes": 60,
+          "effort_level": "high",
+          "impact_level": "high"
+        },
+        {
+          "task_number": 11,
+          "depends_on": [
+            10
+          ],
+          "task_title": "Uji coba stack container dengan docker-compose up",
+          "day_number": 11,
+          "estimated_minutes": 45,
+          "effort_level": "medium",
+          "impact_level": "high"
+        }
+      ]
+    },
+    {
+      "milestone_title": "Dasar CI/CD & Integrasi Project",
+      "order": 4,
+      "tasks": [
+        {
+          "task_number": 12,
+          "depends_on": [
+            11
+          ],
+          "task_title": "Pelajari konsep dasar GitHub Actions",
+          "day_number": 12,
+          "estimated_minutes": 30,
+          "effort_level": "low",
+          "impact_level": "medium"
+        },
+        {
+          "task_number": 13,
+          "depends_on": [
+            12
+          ],
+          "task_title": "Buat workflow GitHub Actions untuk test otomatis",
+          "day_number": 13,
+          "estimated_minutes": 60,
+          "effort_level": "high",
+          "impact_level": "high"
+        },
+        {
+          "task_number": 14,
+          "depends_on": [
+            13
+          ],
+          "task_title": "Review akhir dan uji coba pipeline CI/CD",
+          "day_number": 14,
+          "estimated_minutes": 45,
+          "effort_level": "medium",
+          "impact_level": "high"
+        }
+      ]
+    }
+  ]
+}

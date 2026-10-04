@@ -105,6 +105,7 @@ Berlaku untuk implementasi `app/services/scheduler.py` kecuali diubah:
 
 - Potongan sesi minimal **15 menit**; sisa slot lebih kecil dari itu dilewati.
 - Task **tidak dipecah hanya untuk mengisi batas harian**; dipecah hanya jika slot habis (mis. terpotong kegiatan rutin) atau task lebih besar dari batas harian.
+- Batas harian minimal **sebesar task terbesar** — kalau task sedikit, lebih baik ada hari kosong daripada setiap task dipotong-potong.
 - Task tidak dijadwalkan sebelum **semua prasyaratnya** (`depends_on`) selesai dijadwalkan.
 - Slot yang sudah terisi task dari **goal lain** milik user yang sama dianggap sibuk, dan bebannya ikut dihitung dalam batas harian (`existing_load`).
 - Task yang tidak muat sebelum deadline **dilaporkan terpisah**, tidak diam-diam dijadwalkan melewati deadline.
@@ -126,7 +127,7 @@ Demo: `python scripts/demo_jadwal.py` (dari folder `backend/`) — kalender 2 mi
 ### Keterbatasan yang diketahui
 
 - **Sesi selalu ditaruh di slot paling awal dalam sehari** (mis. tepat setelah kuliah selesai, atau jam 08:00 di akhir pekan). Belum ada preferensi waktu (pagi/sore/malam). ❓ Perlu fitur preferensi jam belajar?
-- **Batas harian dinaikkan untuk semua hari sekaligus** jika ada task yang tidak muat. Dengan rantai dependensi panjang (1 task per hari), ini bisa membuat beberapa hari terisi 2 task dan hari-hari terakhir kosong, padahal cukup satu hari yang ditambah.
+- **Batas harian dinaikkan untuk semua hari sekaligus** jika ada task yang tidak muat. Pada data demo efeknya sudah kecil (hanya 1 hari bertambah), tetapi dengan banyak task berantai masih bisa membuat beban menumpuk di awal minggu.
 - **Jam aktif harian** masih konstanta di kode/demo (mis. 08:00–21:00), belum ada sumber resminya (D10).
 - Hasil AI decomposer masih memakai `day_number` (hari ke-N) sebagai batas paling awal; setelah decomposer diubah ke target mingguan (D4, D11), cukup "awal minggu".
 
@@ -147,4 +148,4 @@ Untuk Annora (PM/UX):
 | :--- | :--- |
 | 4 Okt 2026 | Dokumen dibuat (D1–D9) |
 | 4 Okt 2026 | Hasil diskusi grup: D10 (tanpa input jam luang terpisah), D11 (task dirinci per minggu), D12 (user memilih konsekuensi skip). `time_constraint` diusulkan dipakai ulang untuk kegiatan rutin. |
-| 4 Okt 2026 | Penjadwal FR-4, FR-5, FR-11 selesai diimplementasi (§7: status, keterbatasan). Aturan baru: task tidak dipecah hanya demi batas harian. |
+| 4 Okt 2026 | Penjadwal FR-4, FR-5, FR-11 selesai diimplementasi (§7: status, keterbatasan). Aturan baru: task tidak dipecah hanya demi batas harian; batas harian minimal sebesar task terbesar. |
