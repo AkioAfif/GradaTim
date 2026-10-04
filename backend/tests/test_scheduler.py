@@ -198,6 +198,14 @@ def test_schedule_no_tiny_leftover_session():
     assert [p.minutes for p in sessions_of(result, 1)] == [45, 15]
 
 
+def test_schedule_does_not_split_just_to_fill_daily_cap():
+    # 3 task x 45 menit, 3 hari x 120 menit -> batas harian 54 menit.
+    # Versi lama mengisi Senin 45 + 9 menit task berikutnya; seharusnya tiap task utuh di harinya.
+    result = schedule_tasks([T(n, 45) for n in range(1, 4)], evening_slots(days=[5, 6, 7]))
+    assert len(result.sessions) == 3
+    assert all(s.interval.minutes == 45 for s in result.sessions)
+
+
 def test_schedule_short_task_allowed():
     result = schedule_tasks([T(1, 10)], evening_slots())
     assert sessions_of(result, 1)[0].minutes == 10

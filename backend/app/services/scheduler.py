@@ -243,7 +243,12 @@ def _plan_task(
     daily_cap: int,
     min_session: int,
 ) -> Optional[list[Interval]]:
-    """Cari potongan waktu untuk satu task tanpa mengubah state. None jika tidak muat."""
+    """Cari potongan waktu untuk satu task tanpa mengubah state. None jika tidak muat.
+
+    Task hanya dipecah jika slotnya habis atau task lebih besar dari batas harian — tidak dipecah
+    sekadar untuk mengisi sisa batas harian. Jika sisa batas hari ini kurang tapi task muat utuh
+    di hari lain, hari ini dilewati.
+    """
     remaining = minutes
     pieces: list[Interval] = []
     planned_load: dict[date, int] = defaultdict(int)
@@ -254,8 +259,10 @@ def _plan_task(
         if start >= slot.end:
             continue
         day = start.date()
-        room = min(int((slot.end - start).total_seconds() // 60),
-                   daily_cap - load.get(day, 0) - planned_load[day])
+        cap_room = daily_cap - load.get(day, 0) - planned_load[day]
+        if remaining > cap_room and remaining <= daily_cap:
+            continue  # muat utuh di hari yang lebih longgar, jangan dipecah karena batas harian
+        room = min(int((slot.end - start).total_seconds() // 60), cap_room)
         take = min(remaining, room)
         left = remaining - take
         if 0 < left < min_session:
