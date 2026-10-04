@@ -5,8 +5,9 @@ psycopg[binary]
 alembic
 pydantic
 pydantic-settings
-python-jose
-passlib
+python-jose[cryptography]
+bcrypt
+email-validator
 pytest
 openai
 scikit-learn
