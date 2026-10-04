@@ -327,7 +327,7 @@ def schedule_tasks(
     - Task boleh dipecah ke beberapa sesi (D2), masing-masing minimal `min_session` menit
       (kecuali task itu sendiri lebih pendek).
     - Beban per hari dibatasi agar merata (D5): rata-rata menit per hari yang punya slot luang
-      × DAILY_CAP_TOLERANCE. Jika batas itu membuat task tidak muat padahal masih ada waktu,
+      × DAILY_CAP_TOLERANCE, tetapi minimal sebesar task terbesar. Jika batas itu membuat task tidak muat padahal masih ada waktu,
       batas dinaikkan bertahap.
     - Task yang tetap tidak muat (atau prasyaratnya tidak muat / dependensi melingkar) masuk
       `unscheduled` — tidak pernah dijadwalkan melewati slot yang diberikan.
@@ -344,7 +344,9 @@ def schedule_tasks(
     max_day_free = max(
         sum(s.minutes for s in slots if s.start.date() == d) + existing_load.get(d, 0) for d in days
     )
-    cap = math.ceil(total / len(days) * DAILY_CAP_TOLERANCE)
+    # minimal sebesar task terbesar: kalau task sedikit, lebih baik ada hari kosong daripada
+    # setiap task dipotong-potong karena rata-rata hariannya kecil
+    cap = max(math.ceil(total / len(days) * DAILY_CAP_TOLERANCE), max(t.minutes for t in ordered))
 
     while True:
         result = _schedule_with_cap(ordered, slots, cap, min_session, existing_load)

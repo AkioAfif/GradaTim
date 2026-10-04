@@ -206,6 +206,15 @@ def test_schedule_does_not_split_just_to_fill_daily_cap():
     assert all(s.interval.minutes == 45 for s in result.sessions)
 
 
+def test_schedule_few_tasks_not_split_by_small_average():
+    # 195 menit dalam 7 hari -> rata-rata cuma ~34 menit/hari, tapi task 60 & 90 menit
+    # jangan dipotong-potong; lebih baik beberapa hari kosong
+    tasks = [T(1, 60), T(2, 90, deps=[1]), T(3, 45)]
+    result = schedule_tasks(tasks, evening_slots(days=range(5, 12)))
+    assert result.unscheduled == []
+    assert sorted(s.interval.minutes for s in result.sessions) == [45, 60, 90]
+
+
 def test_schedule_short_task_allowed():
     result = schedule_tasks([T(1, 10)], evening_slots())
     assert sessions_of(result, 1)[0].minutes == 10
