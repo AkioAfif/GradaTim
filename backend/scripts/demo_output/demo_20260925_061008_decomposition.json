@@ -1,0 +1,182 @@
+{
+  "goal_title": "Belajar Docker & CI/CD untuk project kuliah",
+  "estimated_total_days": 14,
+  "milestones": [
+    {
+      "milestone_title": "Dasar-dasar Docker dan Container",
+      "order": 1,
+      "tasks": [
+        {
+          "task_number": 1,
+          "depends_on": [],
+          "task_title": "Install Docker Desktop & verifikasi CLI",
+          "day_number": 1,
+          "estimated_minutes": 45,
+          "effort_level": "medium",
+          "impact_level": "high"
+        },
+        {
+          "task_number": 2,
+          "depends_on": [
+            1
+          ],
+          "task_title": "Jalankan container hello-world pertama",
+          "day_number": 2,
+          "estimated_minutes": 30,
+          "effort_level": "low",
+          "impact_level": "medium"
+        },
+        {
+          "task_number": 3,
+          "depends_on": [
+            2
+          ],
+          "task_title": "Pelajari konsep dasar image dan container",
+          "day_number": 3,
+          "estimated_minutes": 45,
+          "effort_level": "low",
+          "impact_level": "high"
+        }
+      ]
+    },
+    {
+      "milestone_title": "Dockerisasi Aplikasi Python Sederhana",
+      "order": 2,
+      "tasks": [
+        {
+          "task_number": 4,
+          "depends_on": [
+            3
+          ],
+          "task_title": "Buat script Python sederhana untuk project kuliah",
+          "day_number": 4,
+          "estimated_minutes": 45,
+          "effort_level": "medium",
+          "impact_level": "high"
+        },
+        {
+          "task_number": 5,
+          "depends_on": [
+            4
+          ],
+          "task_title": "Tulis file Dockerfile pertama",
+          "day_number": 5,
+          "estimated_minutes": 50,
+          "effort_level": "medium",
+          "impact_level": "high"
+        },
+        {
+          "task_number": 6,
+          "depends_on": [
+            5
+          ],
+          "task_title": "Build image Docker dari Dockerfile",
+          "day_number": 6,
+          "estimated_minutes": 40,
+          "effort_level": "medium",
+          "impact_level": "high"
+        },
+        {
+          "task_number": 7,
+          "depends_on": [
+            6
+          ],
+          "task_title": "Jalankan container Python dan uji hasilnya",
+          "day_number": 7,
+          "estimated_minutes": 45,
+          "effort_level": "low",
+          "impact_level": "high"
+        }
+      ]
+    },
+    {
+      "milestone_title": "Pengenalan Dasar CI/CD dengan GitHub Actions",
+      "order": 3,
+      "tasks": [
+        {
+          "task_number": 8,
+          "depends_on": [
+            7
+          ],
+          "task_title": "Pahami konsep dasar CI/CD dan workflow",
+          "day_number": 8,
+          "estimated_minutes": 45,
+          "effort_level": "low",
+          "impact_level": "medium"
+        },
+        {
+          "task_number": 9,
+          "depends_on": [
+            8
+          ],
+          "task_title": "Buat repository GitHub untuk project kuliah",
+          "day_number": 9,
+          "estimated_minutes": 30,
+          "effort_level": "low",
+          "impact_level": "medium"
+        },
+        {
+          "task_number": 10,
+          "depends_on": [
+            9
+          ],
+          "task_title": "Tulis file YAML workflow GitHub Actions pertama",
+          "day_number": 10,
+          "estimated_minutes": 50,
+          "effort_level": "high",
+          "impact_level": "high"
+        },
+        {
+          "task_number": 11,
+          "depends_on": [
+            10
+          ],
+          "task_title": "Push kode ke GitHub dan cek status Actions",
+          "day_number": 11,
+          "estimated_minutes": 35,
+          "effort_level": "medium",
+          "impact_level": "high"
+        }
+      ]
+    },
+    {
+      "milestone_title": "Integrasi dan Buffer",
+      "order": 4,
+      "tasks": [
+        {
+          "task_number": 12,
+          "depends_on": [
+            11
+          ],
+          "task_title": "Gabungkan Docker dan GitHub Actions workflow",
+          "day_number": 12,
+          "estimated_minutes": 60,
+          "effort_level": "high",
+          "impact_level": "high"
+        },
+        {
+          "task_number": 13,
+          "depends_on": [
+            12
+          ],
+          "task_title": "Evaluasi dan perbaiki error pada pipeline",
+          "day_number": 13,
+          "estimated_minutes": 45,
+          "effort_level": "medium",
+          "impact_level": "medium"
+        },
+        {
+          "task_number": 14,
+          "depends_on": [
+            13
+          ],
+          "task_title": "Dokumentasikan proses untuk laporan kuliah",
+          "day_number": 14,
+          "estimated_minutes": 40,
+          "effort_level": "low",
+          "impact_level": "medium"
+        }
+      ]
+    }
+  ]
+}

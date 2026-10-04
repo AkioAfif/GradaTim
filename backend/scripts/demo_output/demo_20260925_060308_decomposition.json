@@ -1,0 +1,128 @@
+{
+  "goal_title": "Belajar Docker & CI/CD untuk project kuliah",
+  "estimated_total_days": 14,
+  "milestones": [
+    {
+      "milestone_title": "Pengenalan Dasar Docker",
+      "order": 1,
+      "tasks": [
+        {
+          "task_title": "Install Docker Desktop & verifikasi CLI",
+          "day_number": 1,
+          "estimated_minutes": 45,
+          "effort_level": "medium",
+          "impact_level": "high"
+        },
+        {
+          "task_title": "Pelajari konsep dasar container vs VM",
+          "day_number": 2,
+          "estimated_minutes": 30,
+          "effort_level": "low",
+          "impact_level": "medium"
+        },
+        {
+          "task_title": "Jalankan container pertama dari image hello-world",
+          "day_number": 3,
+          "estimated_minutes": 30,
+          "effort_level": "low",
+          "impact_level": "high"
+        }
+      ]
+    },
+    {
+      "milestone_title": "Containerisasi Aplikasi Python",
+      "order": 2,
+      "tasks": [
+        {
+          "task_title": "Buat script Python sederhana untuk project kuliah",
+          "day_number": 4,
+          "estimated_minutes": 45,
+          "effort_level": "medium",
+          "impact_level": "medium"
+        },
+        {
+          "task_title": "Tulis file Dockerfile pertama untuk aplikasi Python",
+          "day_number": 5,
+          "estimated_minutes": 50,
+          "effort_level": "medium",
+          "impact_level": "high"
+        },
+        {
+          "task_title": "Build image Docker dari Dockerfile yang dibuat",
+          "day_number": 6,
+          "estimated_minutes": 40,
+          "effort_level": "medium",
+          "impact_level": "high"
+        },
+        {
+          "task_title": "Jalankan container Docker dari image custom",
+          "day_number": 7,
+          "estimated_minutes": 45,
+          "effort_level": "medium",
+          "impact_level": "high"
+        }
+      ]
+    },
+    {
+      "milestone_title": "Manajemen Data & Multi-Container",
+      "order": 3,
+      "tasks": [
+        {
+          "task_title": "Pelajari penggunaan Docker Volumes untuk data persisten",
+          "day_number": 8,
+          "estimated_minutes": 50,
+          "effort_level": "medium",
+          "impact_level": "medium"
+        },
+        {
+          "task_title": "Tulis file docker-compose.yml untuk project",
+          "day_number": 9,
+          "estimated_minutes": 60,
+          "effort_level": "high",
+          "impact_level": "high"
+        },
+        {
+          "task_title": "Uji coba menjalankan stack dengan Docker Compose",
+          "day_number": 10,
+          "estimated_minutes": 45,
+          "effort_level": "medium",
+          "impact_level": "high"
+        }
+      ]
+    },
+    {
+      "milestone_title": "Dasar CI/CD & GitHub Actions",
+      "order": 4,
+      "tasks": [
+        {
+          "task_title": "Pelajari konsep dasar CI/CD pipeline",
+          "day_number": 11,
+          "estimated_minutes": 30,
+          "effort_level": "low",
+          "impact_level": "medium"
+        },
+        {
+          "task_title": "Buat file workflow GitHub Actions pertama",
+          "day_number": 12,
+          "estimated_minutes": 50,
+          "effort_level": "high",
+          "impact_level": "high"
+        },
+        {
+          "task_title": "Push project ke GitHub & verifikasi pipeline berjalan",
+          "day_number": 13,
+          "estimated_minutes": 40,
+          "effort_level": "medium",
+          "impact_level": "high"
+        },
+        {
+          "task_title": "Evaluasi dan perbaiki kendala workflow CI/CD",
+          "day_number": 14,
+          "estimated_minutes": 30,
+          "effort_level": "low",
+          "impact_level": "medium"
+        }
+      ]
+    }
+  ]
+}

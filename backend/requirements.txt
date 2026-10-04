@@ -8,3 +8,7 @@ pydantic-settings
 python-jose
 passlib
 pytest
+openai
+scikit-learn
+numpy
+joblib

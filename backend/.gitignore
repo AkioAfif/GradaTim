@@ -3,3 +3,6 @@ blueprint/
 __pycache__/
 *.pyc
 *.pyo
+venv/
+.venv/
+.pytest_cache/
