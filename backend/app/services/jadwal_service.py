@@ -2,28 +2,35 @@
 
 scheduler.py berisi logika murni tanpa database. Modul ini:
     - membaca kegiatan rutin, agenda, dan sesi jadwal user dari database
-      lalu mengubahnya ke bentuk yang dipahami scheduler  (tahap A — modul ini)
-    - menyimpan hasil penjadwalan & re-planning ke tabel jadwal_task  (tahap B, C)
+      lalu mengubahnya ke bentuk yang dipahami scheduler
+    - menjadwalkan task sebuah goal dan menyimpan sesinya ke tabel jadwal_task  (FR-4)
+    - re-planning  (tahap C, menyusul)
+
+Fungsi di sini hanya `flush`, tidak `commit` — commit dilakukan endpoint pemanggil.
 
 Dipanggil dari endpoint API; endpoint tidak perlu tahu detail scheduler.
 Keputusan desain: docs/KEPUTUSAN_DESAIN_PENJADWALAN.md
 """
 
+from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app.core.config import settings
-from app.models import Agenda, Goal, JadwalTask, Milestone, Task, TimeConstraint, User
+from app.models import Agenda, Goal, JadwalTask, Milestone, Task, TaskDependency, TimeConstraint, User
 from app.services.scheduler import (
     BusyBlock,
     Interval,
     Session,
+    TaskToSchedule,
     WeeklyWindow,
     busy_blocks,
     free_slots,
+    schedule_tasks,
+    subtract_intervals,
 )
 
 # Nilai kolom jadwal_task.status. Sesi `dilewati` hanya riwayat — tidak dianggap sibuk & tidak dijadwalkan ulang lagi.
@@ -122,3 +129,122 @@ def muat_konteks(db: DbSession, user: User, mulai: datetime, akhir: datetime) ->
         sesi=sesi_user(db, user, mulai, akhir),
         slot_luang=free_slots(jam_aktif(), mulai, akhir, rutin, busy=[a.interval for a in agenda]),
     )
+
+
+# ============================================================
+# PENJADWALAN GOAL (FR-4)
+# ============================================================
+
+@dataclass
+class HasilPenjadwalan:
+    sesi_baru: list[JadwalTask] = field(default_factory=list)  # baris jadwal_task yang baru dibuat
+    tidak_muat: list[int] = field(default_factory=list)  # id_task yang tidak muat sebelum batas waktu
+
+
+def task_belum_terjadwal(db: DbSession, goal: Goal) -> list[Task]:
+    """Task goal yang perlu dijadwalkan: belum selesai, tidak punya sub-task (yang dikerjakan
+    sub-task-nya), dan belum punya sesi selain yang `dilewati`."""
+    tasks = db.scalars(
+        select(Task)
+        .join(Milestone, Task.id_milestone == Milestone.id_milestone)
+        .where(Milestone.id_goal == goal.id_goal, Task.status != TASK_STATUS_DONE)
+        .order_by(Task.id_task)
+    ).all()
+    punya_sub = set(db.scalars(select(Task.id_parent_task).where(Task.id_parent_task.is_not(None))).all())
+    sudah_terjadwal = set(db.scalars(
+        select(JadwalTask.id_task).where(
+            JadwalTask.id_task.in_([t.id_task for t in tasks]),
+            JadwalTask.status != STATUS_DILEWATI,
+        )
+    ).all())
+    return [t for t in tasks if t.id_task not in punya_sub and t.id_task not in sudah_terjadwal]
+
+
+def prasyarat_task(db: DbSession, id_tasks: list[int]) -> dict[int, tuple[int, ...]]:
+    """{id_task: (id_task_prasyarat, ...)} dari tabel task_dependency."""
+    rows = db.scalars(select(TaskDependency).where(TaskDependency.id_task.in_(id_tasks))).all()
+    deps: dict[int, list[int]] = defaultdict(list)
+    for r in rows:
+        deps[r.id_task].append(r.id_task_prasyarat)
+    return {n: tuple(sorted(d)) for n, d in deps.items()}
+
+
+def _selesai_prasyarat_luar(db: DbSession, id_tasks: set[int]) -> dict[int, datetime]:
+    """Waktu selesai sesi terakhir tiap prasyarat yang sudah terjadwal tapi belum selesai."""
+    rows = db.execute(
+        select(JadwalTask.id_task, JadwalTask.waktu_selesai)
+        .join(Task, JadwalTask.id_task == Task.id_task)
+        .where(
+            JadwalTask.id_task.in_(id_tasks),
+            JadwalTask.status != STATUS_DILEWATI,
+            Task.status != TASK_STATUS_DONE,
+        )
+    ).all()
+    akhir: dict[int, datetime] = {}
+    for id_task, selesai in rows:
+        akhir[id_task] = max(akhir.get(id_task, selesai), selesai)
+    return akhir
+
+
+def jadwalkan_goal(db: DbSession, user: User, goal: Goal, sekarang: datetime) -> HasilPenjadwalan:
+    """
+    Jadwalkan task goal yang belum terjadwal ke slot luang minggu ini (FR-4, D5, D7) dan simpan
+    sesinya ke jadwal_task berstatus `terjadwal`.
+
+    - Batas waktu: akhir minggu ini (unit perencanaan = minggu, D11), atau deadline goal jika lebih awal.
+      Task yang tidak muat masuk `tidak_muat`, tidak pernah dijadwalkan melewati batas itu.
+    - Sesi yang sudah ada (goal ini maupun goal lain) dianggap sibuk dan ikut dihitung dalam batas
+      beban harian, sehingga hari yang sudah padat tidak ditambah lagi.
+    - Task tanpa durasi_estimasi dianggap DEFAULT_DURASI_MENIT.
+    - Prasyarat yang sudah terjadwal tapi belum selesai harus ditunggu sampai sesi terakhirnya selesai.
+    """
+    if goal.id_user != user.id_user:
+        raise ValueError("Goal bukan milik user ini")
+
+    tasks = task_belum_terjadwal(db, goal)
+    akhir = awal_minggu(sekarang) + timedelta(days=7)
+    if goal.deadline is not None:
+        akhir = min(akhir, goal.deadline)
+    if not tasks:
+        return HasilPenjadwalan()
+    if akhir <= sekarang:
+        return HasilPenjadwalan(tidak_muat=[t.id_task for t in tasks])
+
+    konteks = muat_konteks(db, user, sekarang, akhir)
+    sibuk = [s.interval for s in konteks.sessions]
+    slot = subtract_intervals(konteks.slot_luang, sibuk)
+    beban: dict[date, int] = defaultdict(int)
+    for iv in sibuk:
+        beban[iv.start.date()] += iv.minutes
+
+    deps = prasyarat_task(db, [t.id_task for t in tasks])
+    id_batch = {t.id_task for t in tasks}
+    luar = {d for ds in deps.values() for d in ds if d not in id_batch}
+    selesai_luar = _selesai_prasyarat_luar(db, luar) if luar else {}
+
+    def paling_awal(id_task: int) -> datetime | None:
+        tunggu = [selesai_luar[d] for d in deps.get(id_task, ()) if d in selesai_luar]
+        return max(tunggu) if tunggu else None
+
+    hasil = schedule_tasks(
+        [
+            TaskToSchedule(
+                t.id_task,
+                t.durasi_estimasi if t.durasi_estimasi and t.durasi_estimasi > 0 else DEFAULT_DURASI_MENIT,
+                deps.get(t.id_task, ()),
+                paling_awal(t.id_task),
+            )
+            for t in tasks
+        ],
+        slot,
+        existing_load=beban,
+    )
+
+    sesi_baru = [
+        JadwalTask(id_task=s.task_number, waktu_mulai=s.interval.start, waktu_selesai=s.interval.end,
+                   status=STATUS_TERJADWAL)
+        for s in hasil.sessions
+    ]
+    db.add_all(sesi_baru)
+    db.flush()
+    return HasilPenjadwalan(sesi_baru=sesi_baru, tidak_muat=hasil.unscheduled)
