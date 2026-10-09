@@ -215,3 +215,72 @@ def test_jadwalkan_goal_reports_tasks_that_do_not_fit(client, db, data, jam_8_21
 
     assert [s["id_task"] for s in body["sesi_baru"]] == [muat.id_task]
     assert body["tidak_muat"] == [{"id_task": tidak.id_task, "nama_task": "Git 1"}]
+
+
+# ------------------------------------------------------------
+# POST /jadwal/susun-ulang
+# ------------------------------------------------------------
+
+def sesi_task(db, task):
+    return db.query(JadwalTask).filter_by(id_task=task.id_task).order_by(JadwalTask.waktu_mulai).all()
+
+
+def test_susun_ulang_requires_login(client):
+    assert client.post(f"{URL}/susun-ulang").status_code == 401
+
+
+def test_susun_ulang_without_body_moves_missed_sessions(client, db, data, jam_8_21, monkeypatch):
+    user, _, (_, b) = data  # sesi b Rabu 09:00-10:00 masih `terjadwal`
+    atur_sekarang(monkeypatch, dt(7, 12))
+
+    res = client.post(f"{URL}/susun-ulang", headers=auth(user))  # tanpa body
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["dipindah"] == [{"id_task": b.id_task, "nama_task": "Task 1"}]
+    assert body["tidak_muat"] == []
+    assert [(s["status"], s["waktu_mulai"]) for s in body["sesi_dilewati"]] == [
+        (STATUS_DILEWATI, "2026-10-07T09:00:00")]
+    (baru,) = body["sesi_baru"]
+    assert baru["id_task"] == b.id_task and baru["waktu_mulai"] >= "2026-10-07T12:00:00"
+
+    # tersimpan: kalender menampilkan sesi pengganti, bukan sesi yang terlewat
+    kalender = client.get(URL, params={"minggu": "2026-10-07"}, headers=auth(user)).json()
+    assert [s["id_jadwal"] for s in kalender["sesi"] if s["id_task"] == b.id_task] == [baru["id_jadwal"]]
+
+
+def test_susun_ulang_deferred_task_moves_to_tomorrow(client, db, data, jam_8_21, monkeypatch):
+    user, _, (_, b) = data
+    db.add(JadwalTask(task=b, waktu_mulai=dt(7, 19), waktu_selesai=dt(7, 20)))
+    db.commit()
+    atur_sekarang(monkeypatch, dt(7, 8))  # sebelum sesi 09:00, jadi belum ada yang terlewat
+
+    body = client.post(f"{URL}/susun-ulang", json={"ditunda": [b.id_task]}, headers=auth(user)).json()
+
+    assert [t["id_task"] for t in body["dipindah"]] == [b.id_task]
+    assert body["sesi_dilewati"] == []
+    assert all(s["waktu_mulai"] >= "2026-10-08T00:00:00" for s in body["sesi_baru"])
+    assert all(s.waktu_mulai >= dt(8, 0) for s in sesi_task(db, b) if s.status == STATUS_TERJADWAL)
+
+
+def test_susun_ulang_rejects_other_users_or_unknown_task(client, db, data, monkeypatch):
+    user, _, (_, b) = data
+    task_lain = db.query(Task).join(Milestone).join(Goal).join(User).filter(User.email == "akio@example.com").first()
+    atur_sekarang(monkeypatch, dt(7, 12))
+
+    for ditunda in ([task_lain.id_task], [b.id_task, 9999]):
+        res = client.post(f"{URL}/susun-ulang", json={"ditunda": ditunda}, headers=auth(user))
+        assert res.status_code == 404 and res.json()["detail"] == "Task tidak ditemukan"
+    # tidak ada yang berubah, termasuk sesi b yang sebenarnya sudah terlewat
+    assert [s.status for s in sesi_task(db, b)] == [STATUS_DILEWATI, STATUS_TERJADWAL]
+
+
+def test_susun_ulang_reports_tasks_that_no_longer_fit(client, db, data, jam_8_21, monkeypatch):
+    user, _, (_, b) = data
+    atur_sekarang(monkeypatch, dt(11, 20, 30))  # Minggu 20:30, sisa 30 menit
+
+    body = client.post(f"{URL}/susun-ulang", headers=auth(user)).json()
+
+    assert body["tidak_muat"] == [{"id_task": b.id_task, "nama_task": "Task 1"}]
+    assert body["dipindah"] == [] and body["sesi_baru"] == []
+    assert [s["waktu_mulai"] for s in body["sesi_dilewati"]] == ["2026-10-07T09:00:00"]

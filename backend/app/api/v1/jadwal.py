@@ -8,13 +8,22 @@ from datetime import date, datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
 from app.core.config import settings
-from app.models import Goal, JadwalTask, Task, User
-from app.schemas.jadwal import BlokKalender, HasilPenjadwalanRead, JadwalMingguan, SesiRead, TaskTidakMuat
-from app.services.jadwal_service import awal_minggu, jadwalkan_goal, muat_konteks
+from app.models import Goal, JadwalTask, Milestone, Task, User
+from app.schemas.jadwal import (
+    BlokKalender,
+    HasilPenjadwalanRead,
+    HasilSusunUlangRead,
+    JadwalMingguan,
+    SesiRead,
+    SusunUlangRequest,
+    TaskRingkas,
+)
+from app.services.jadwal_service import awal_minggu, jadwalkan_goal, muat_konteks, susun_ulang_minggu_ini
 from app.services.scheduler import busy_blocks
 
 router = APIRouter()
@@ -30,6 +39,10 @@ def _ke_sesi_read(row: JadwalTask) -> SesiRead:
         waktu_selesai=row.waktu_selesai,
         status=row.status,
     )
+
+
+def _task_ringkas(db: Session, id_tasks: list[int]) -> list[TaskRingkas]:
+    return [TaskRingkas(id_task=t.id_task, nama_task=t.nama_task) for t in (db.get(Task, i) for i in id_tasks)]
 
 
 @router.get("", response_model=JadwalMingguan)
@@ -75,8 +88,40 @@ def jadwalkan_task_goal(
 
     hasil = jadwalkan_goal(db, current_user, goal, datetime.now())
     db.commit()
-    tidak_muat = [db.get(Task, id_task) for id_task in hasil.tidak_muat]
     return HasilPenjadwalanRead(
         sesi_baru=[_ke_sesi_read(r) for r in hasil.sesi_baru],
-        tidak_muat=[TaskTidakMuat(id_task=t.id_task, nama_task=t.nama_task) for t in tidak_muat],
+        tidak_muat=_task_ringkas(db, hasil.tidak_muat),
+    )
+
+
+@router.post("/susun-ulang", response_model=HasilSusunUlangRead)
+def susun_ulang_jadwal(
+    payload: SusunUlangRequest = SusunUlangRequest(),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> HasilSusunUlangRead:
+    """Susun ulang jadwal minggu ini (FR-11): sesi yang terlewat dan task yang ditunda karena mood
+    dipindah ke slot kosong berikutnya di minggu yang sama. Sesi lain yang masih valid tidak digeser.
+
+    Body boleh kosong. Dipanggil mis. saat user membuka aplikasi (mengurus sesi terlewat) atau setelah
+    user menunda task hari ini.
+    """
+    ditunda = set(payload.ditunda)
+    if ditunda:
+        milik_user = set(db.scalars(
+            select(Task.id_task)
+            .join(Milestone, Task.id_milestone == Milestone.id_milestone)
+            .join(Goal, Milestone.id_goal == Goal.id_goal)
+            .where(Task.id_task.in_(ditunda), Goal.id_user == current_user.id_user)
+        ).all())
+        if ditunda - milik_user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task tidak ditemukan")
+
+    hasil = susun_ulang_minggu_ini(db, current_user, datetime.now(), ditunda=sorted(ditunda))
+    db.commit()
+    return HasilSusunUlangRead(
+        dipindah=_task_ringkas(db, hasil.dipindah),
+        tidak_muat=_task_ringkas(db, hasil.tidak_muat),
+        sesi_baru=[_ke_sesi_read(r) for r in hasil.sesi_baru],
+        sesi_dilewati=[_ke_sesi_read(r) for r in hasil.sesi_dilewati],
     )

@@ -2,7 +2,7 @@
 
 from datetime import datetime, time
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class BlokKalender(BaseModel):
@@ -22,7 +22,7 @@ class SesiRead(BaseModel):
     nama_task: str
     waktu_mulai: datetime
     waktu_selesai: datetime
-    status: str  # terjadwal | selesai
+    status: str  # terjadwal | selesai | dilewati
 
 
 class JadwalMingguan(BaseModel):
@@ -37,7 +37,7 @@ class JadwalMingguan(BaseModel):
     sesi: list[SesiRead]
 
 
-class TaskTidakMuat(BaseModel):
+class TaskRingkas(BaseModel):
     id_task: int
     nama_task: str
 
@@ -47,4 +47,19 @@ class HasilPenjadwalanRead(BaseModel):
 
     sesi_baru: list[SesiRead]
     # task yang tidak muat sebelum akhir minggu / deadline goal — tidak dijadwalkan sama sekali
-    tidak_muat: list[TaskTidakMuat]
+    tidak_muat: list[TaskRingkas]
+
+
+class SusunUlangRequest(BaseModel):
+    # task yang hari ini ditunda karena mood (D7) — sesinya yang belum lewat hari ini dipindah mulai besok
+    ditunda: list[int] = Field(default_factory=list)
+
+
+class HasilSusunUlangRead(BaseModel):
+    """Hasil penyusunan ulang jadwal minggu ini (FR-11)."""
+
+    dipindah: list[TaskRingkas]  # task yang sesinya dijadwalkan ulang
+    # tidak muat lagi minggu ini → user memilih konsekuensinya (D12)
+    tidak_muat: list[TaskRingkas]
+    sesi_baru: list[SesiRead]
+    sesi_dilewati: list[SesiRead]  # sesi terlewat, kini berstatus `dilewati` (riwayat)
