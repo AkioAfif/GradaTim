@@ -9,6 +9,7 @@ python-jose[cryptography]
 bcrypt
 email-validator
 pytest
+httpx2  # dipakai fastapi/starlette TestClient (starlette >= 1.0 memakai httpx2, bukan httpx)
 openai
 scikit-learn
 numpy
