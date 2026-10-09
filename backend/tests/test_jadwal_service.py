@@ -23,6 +23,7 @@ from app.services.jadwal_service import (
     ke_session,
     muat_konteks,
     sesi_user,
+    susun_ulang_minggu_ini,
 )
 from app.services.scheduler import Interval, validate_schedule
 
@@ -329,3 +330,113 @@ def test_jadwalkan_goal_rejects_other_users_goal(db):
 
     with pytest.raises(ValueError):
         jadwalkan_goal(db, user, goal, SENIN_PAGI)
+
+
+# ------------------------------------------------------------
+# RE-PLANNING (FR-11)
+# ------------------------------------------------------------
+
+RABU_SIANG = dt(7, 12)
+
+
+def sesi(task, mulai, selesai, status=STATUS_TERJADWAL):
+    return JadwalTask(task=task, waktu_mulai=mulai, waktu_selesai=selesai, status=status)
+
+
+def test_susun_ulang_nothing_missed_changes_nothing(db, jam_8_21):
+    user, (a, b, _) = buat_user(db)
+    db.add_all([sesi(a, dt(5, 9), dt(5, 10), STATUS_SELESAI), sesi(b, dt(8, 9), dt(8, 10))])
+    db.flush()
+
+    hasil = susun_ulang_minggu_ini(db, user, RABU_SIANG)
+
+    assert hasil == jadwal_service.HasilSusunUlang()
+    assert db.query(JadwalTask).count() == 2
+
+
+def test_susun_ulang_missed_session_kept_as_history_and_rescheduled(db, jam_8_21):
+    user, (a, b, _) = buat_user(db)
+    terlewat = sesi(a, dt(6, 9), dt(6, 10))
+    tetap = sesi(b, dt(8, 9), dt(8, 10))
+    db.add_all([terlewat, tetap])
+    db.flush()
+
+    hasil = susun_ulang_minggu_ini(db, user, RABU_SIANG)
+
+    assert hasil.dipindah == [a.id_task] and hasil.tidak_muat == []
+    assert hasil.sesi_dilewati == [terlewat] and terlewat.status == STATUS_DILEWATI
+    assert [(s.id_task, s.status) for s in hasil.sesi_baru] == [(a.id_task, STATUS_TERJADWAL)]
+    baru = hasil.sesi_baru[0]
+    assert baru.id_jadwal is not None
+    assert RABU_SIANG <= baru.waktu_mulai and baru.waktu_selesai <= MINGGU_INI[1]
+    assert baru.waktu_selesai - baru.waktu_mulai == terlewat.waktu_selesai - terlewat.waktu_mulai
+    # sesi lain yang masih valid tidak disentuh
+    assert (tetap.waktu_mulai, tetap.status) == (dt(8, 9), STATUS_TERJADWAL)
+
+
+def test_susun_ulang_moves_dependent_sessions(db, jam_8_21):
+    user, (a, b, _) = buat_user(db)
+    db.add_all([
+        sesi(a, dt(6, 9), dt(6, 10)),
+        sesi(b, dt(7, 13), dt(7, 14)),  # masih valid, tapi bergantung pada a yang dipindah
+        TaskDependency(task=b, task_prasyarat=a),
+    ])
+    db.flush()
+
+    hasil = susun_ulang_minggu_ini(db, user, RABU_SIANG)
+
+    assert hasil.dipindah == sorted([a.id_task, b.id_task])
+    assert [s.status for s in sesi_tersimpan(db, a)] == [STATUS_DILEWATI, STATUS_TERJADWAL]
+    (sesi_b,) = sesi_tersimpan(db, b)  # sesi lama b dihapus, bukan ditandai dilewati
+    assert sesi_tersimpan(db, a)[-1].waktu_selesai <= sesi_b.waktu_mulai
+
+
+def test_susun_ulang_deferred_task_moves_to_tomorrow(db, jam_8_21):
+    user, (a, b, _) = buat_user(db)
+    db.add_all([sesi(a, dt(7, 15), dt(7, 16)), sesi(b, dt(7, 17), dt(7, 18))])
+    db.flush()
+
+    hasil = susun_ulang_minggu_ini(db, user, RABU_SIANG, ditunda=[a.id_task])
+
+    assert hasil.dipindah == [a.id_task] and hasil.sesi_dilewati == []
+    (sesi_a,) = sesi_tersimpan(db, a)
+    assert sesi_a.waktu_mulai >= dt(8, 0) and sesi_a.status == STATUS_TERJADWAL
+    assert [s.waktu_mulai for s in sesi_tersimpan(db, b)] == [dt(7, 17)]
+
+
+def test_susun_ulang_ignores_sessions_of_done_tasks(db, jam_8_21):
+    user, (a, _, _) = buat_user(db)
+    a.status = "done"  # task ditandai selesai walau sesinya tidak ditandai
+    db.add(sesi(a, dt(6, 9), dt(6, 10)))
+    db.flush()
+
+    hasil = susun_ulang_minggu_ini(db, user, RABU_SIANG)
+
+    assert hasil.dipindah == [] and hasil.sesi_baru == []
+    assert [s.status for s in sesi_tersimpan(db, a)] == [STATUS_TERJADWAL]
+
+
+def test_susun_ulang_reports_tasks_that_no_longer_fit(db, jam_8_21):
+    user, (a, _, _) = buat_user(db)
+    terlewat = sesi(a, dt(10, 9), dt(10, 10))
+    db.add(terlewat)
+    db.flush()
+
+    hasil = susun_ulang_minggu_ini(db, user, dt(11, 20, 30))  # Minggu 20:30, sisa 30 menit
+
+    assert hasil.tidak_muat == [a.id_task] and hasil.dipindah == [] and hasil.sesi_baru == []
+    assert terlewat.status == STATUS_DILEWATI
+
+
+def test_susun_ulang_only_touches_own_sessions_and_has_no_conflicts(db, user_lengkap, jam_8_21):
+    user, tasks = user_lengkap
+    lain = db.query(JadwalTask).join(Task).join(Milestone).join(Goal).filter(Goal.id_user != user.id_user).one()
+    db.add(sesi(tasks[2], dt(6, 9), dt(6, 11)))
+    db.flush()
+
+    hasil = susun_ulang_minggu_ini(db, user, RABU_SIANG)
+
+    assert hasil.dipindah == [tasks[2].id_task]
+    assert (lain.waktu_mulai, lain.status) == (dt(6, 15), STATUS_TERJADWAL)
+    konteks = muat_konteks(db, user, RABU_SIANG, MINGGU_INI[1])
+    assert validate_schedule(konteks.sessions, [b for b in konteks.blok_sibuk() if b.kind != "task"]) == []

@@ -4,7 +4,7 @@ scheduler.py berisi logika murni tanpa database. Modul ini:
     - membaca kegiatan rutin, agenda, dan sesi jadwal user dari database
       lalu mengubahnya ke bentuk yang dipahami scheduler
     - menjadwalkan task sebuah goal dan menyimpan sesinya ke tabel jadwal_task  (FR-4)
-    - re-planning  (tahap C, menyusul)
+    - menyusun ulang jadwal minggu ini: sesi terlewat & task yang ditunda karena mood  (FR-11)
 
 Fungsi di sini hanya `flush`, tidak `commit` — commit dilakukan endpoint pemanggil.
 
@@ -12,9 +12,10 @@ Dipanggil dari endpoint API; endpoint tidak perlu tahu detail scheduler.
 Keputusan desain: docs/KEPUTUSAN_DESAIN_PENJADWALAN.md
 """
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+from typing import Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
@@ -29,6 +30,7 @@ from app.services.scheduler import (
     WeeklyWindow,
     busy_blocks,
     free_slots,
+    replan,
     schedule_tasks,
     subtract_intervals,
 )
@@ -248,3 +250,82 @@ def jadwalkan_goal(db: DbSession, user: User, goal: Goal, sekarang: datetime) ->
     db.add_all(sesi_baru)
     db.flush()
     return HasilPenjadwalan(sesi_baru=sesi_baru, tidak_muat=hasil.unscheduled)
+
+
+# ============================================================
+# RE-PLANNING (FR-11)
+# ============================================================
+
+@dataclass
+class HasilSusunUlang:
+    dipindah: list[int] = field(default_factory=list)  # id_task yang sesinya dijadwalkan ulang
+    tidak_muat: list[int] = field(default_factory=list)  # tidak muat lagi minggu ini → user memilih konsekuensi (D12)
+    sesi_baru: list[JadwalTask] = field(default_factory=list)  # baris jadwal_task pengganti
+    sesi_dilewati: list[JadwalTask] = field(default_factory=list)  # sesi terlewat, kini berstatus `dilewati`
+
+
+def susun_ulang_minggu_ini(
+    db: DbSession, user: User, sekarang: datetime, ditunda: Iterable[int] = ()
+) -> HasilSusunUlang:
+    """
+    Jadwalkan ulang sesi minggu ini yang terlewat atau ditunda karena mood (FR-11, D7).
+
+    ditunda: id_task yang hari ini ditunda — sesinya yang belum lewat hari ini dipindah mulai besok.
+
+    Perubahan di tabel jadwal_task:
+    - sesi yang terlewat (sudah lewat, masih `terjadwal`) → status `dilewati`, disimpan sebagai riwayat
+    - sesi mendatang yang ikut dipindah (ditunda, atau task-nya bergantung pada task yang
+      dipindah) → dihapus
+    - sesi pengganti → baris baru berstatus `terjadwal`
+    Sesi lain yang masih valid tidak disentuh. Sesi dari task yang sudah `done` dianggap selesai.
+    """
+    mulai = awal_minggu(sekarang)
+    konteks = muat_konteks(db, user, mulai, mulai + timedelta(days=7))
+    rows = konteks.sesi
+    if not rows:
+        return HasilSusunUlang()
+
+    def ke_session_replan(row: JadwalTask) -> Session:
+        done = row.status == STATUS_SELESAI or row.task.status == TASK_STATUS_DONE
+        return Session(row.id_task, Interval(row.waktu_mulai, row.waktu_selesai), done=done)
+
+    sessions = [ke_session_replan(r) for r in rows]
+    hasil = replan(
+        sessions,
+        konteks.slot_luang,
+        sekarang,
+        depends_on=prasyarat_task(db, sorted({r.id_task for r in rows})),
+        deferred=ditunda,
+    )
+
+    # Sesi lama yang masih ada persis di hasil = tetap; sisanya dipindah. Sesi hasil yang tidak
+    # cocok dengan sesi lama mana pun = sesi pengganti.
+    sisa = Counter(hasil.sessions)
+    dipindah: list[JadwalTask] = []
+    for row, sesi in zip(rows, sessions):
+        if sisa[sesi] > 0:
+            sisa[sesi] -= 1
+        else:
+            dipindah.append(row)
+
+    sesi_dilewati = []
+    for row in dipindah:
+        if row.waktu_selesai <= sekarang:
+            row.status = STATUS_DILEWATI
+            sesi_dilewati.append(row)
+        else:
+            db.delete(row)
+
+    sesi_baru = [
+        JadwalTask(id_task=s.task_number, waktu_mulai=s.interval.start, waktu_selesai=s.interval.end,
+                   status=STATUS_TERJADWAL)
+        for s in sorted(sisa.elements(), key=lambda s: s.interval.start)
+    ]
+    db.add_all(sesi_baru)
+    db.flush()
+    return HasilSusunUlang(
+        dipindah=hasil.rescheduled,
+        tidak_muat=hasil.unscheduled,
+        sesi_baru=sesi_baru,
+        sesi_dilewati=sesi_dilewati,
+    )
