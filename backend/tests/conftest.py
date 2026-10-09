@@ -3,6 +3,7 @@
 import itertools
 from datetime import date
 
+import bcrypt
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
@@ -36,6 +37,13 @@ def _skema_baru():
     Base.metadata.create_all(engine)
     yield
     Base.metadata.drop_all(engine)
+
+
+@pytest.fixture(autouse=True)
+def _bcrypt_cepat(monkeypatch):
+    """Cost bcrypt minimum di tes saja (default 12 → ~0,2 detik per hash); kode produksi tidak berubah."""
+    gensalt_asli = bcrypt.gensalt
+    monkeypatch.setattr(bcrypt, "gensalt", lambda rounds=4, prefix=b"2b": gensalt_asli(rounds, prefix))
 
 
 @pytest.fixture(autouse=True)
