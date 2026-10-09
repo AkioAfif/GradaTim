@@ -284,3 +284,124 @@ def test_susun_ulang_reports_tasks_that_no_longer_fit(client, db, data, jam_8_21
     assert body["tidak_muat"] == [{"id_task": b.id_task, "nama_task": "Task 1"}]
     assert body["dipindah"] == [] and body["sesi_baru"] == []
     assert [s["waktu_mulai"] for s in body["sesi_dilewati"]] == ["2026-10-07T09:00:00"]
+
+
+# ------------------------------------------------------------
+# PATCH /jadwal/sesi/{id_jadwal}
+# ------------------------------------------------------------
+
+def sesi_rabu(db, b):
+    """Sesi task b Rabu 09:00-10:00 (`terjadwal`) dari fixture `data`."""
+    return db.query(JadwalTask).filter_by(id_task=b.id_task, status=STATUS_TERJADWAL).one()
+
+
+def test_ubah_sesi_requires_login(client, db, data):
+    _, _, (_, b) = data
+    assert client.patch(f"{URL}/sesi/{sesi_rabu(db, b).id_jadwal}", json={"status": "selesai"}).status_code == 401
+
+
+def test_ubah_sesi_not_found_for_other_users_or_missing_session(client, db, data):
+    user, _, _ = data
+    sesi_lain = db.query(JadwalTask).join(Task).join(Milestone).join(Goal).join(User).filter(
+        User.email == "akio@example.com").one()
+    for id_jadwal in (sesi_lain.id_jadwal, 9999):
+        res = client.patch(f"{URL}/sesi/{id_jadwal}", json={"status": "selesai"}, headers=auth(user))
+        assert res.status_code == 404 and res.json()["detail"] == "Sesi tidak ditemukan"
+    db.refresh(sesi_lain)
+    assert sesi_lain.status == STATUS_TERJADWAL
+
+
+def test_ubah_sesi_mark_done_and_undo(client, db, data):
+    user, _, (_, b) = data
+    sesi = sesi_rabu(db, b)
+    url = f"{URL}/sesi/{sesi.id_jadwal}"
+
+    res = client.patch(url, json={"status": "selesai"}, headers=auth(user))
+    assert res.status_code == 200 and res.json()["status"] == STATUS_SELESAI
+    db.refresh(sesi)
+    assert sesi.status == STATUS_SELESAI
+
+    assert client.patch(url, json={"status": "terjadwal"}, headers=auth(user)).json()["status"] == STATUS_TERJADWAL
+
+
+def test_ubah_sesi_move_without_conflict(client, db, data):
+    user, _, (_, b) = data
+    sesi = sesi_rabu(db, b)
+
+    res = client.patch(f"{URL}/sesi/{sesi.id_jadwal}", headers=auth(user),
+                       json={"waktu_mulai": "2026-10-08T10:00:00", "waktu_selesai": "2026-10-08T11:30:00"})
+
+    assert res.status_code == 200
+    assert (res.json()["waktu_mulai"], res.json()["waktu_selesai"]) == ("2026-10-08T10:00:00", "2026-10-08T11:30:00")
+    db.refresh(sesi)
+    assert (sesi.waktu_mulai, sesi.waktu_selesai, sesi.status) == (dt(8, 10), dt(8, 11, 30), STATUS_TERJADWAL)
+
+
+def test_ubah_sesi_shift_overlapping_its_old_position_is_allowed(client, db, data):
+    user, _, (_, b) = data
+    sesi = sesi_rabu(db, b)
+    res = client.patch(f"{URL}/sesi/{sesi.id_jadwal}", headers=auth(user),
+                       json={"waktu_mulai": "2026-10-07T09:30:00", "waktu_selesai": "2026-10-07T10:30:00"})
+    assert res.status_code == 200
+
+
+def test_ubah_sesi_conflict_returns_409_and_keeps_session(client, db, data):
+    user, _, (a, b) = data
+    db.add(JadwalTask(task=a, waktu_mulai=dt(7, 18), waktu_selesai=dt(7, 19)))
+    db.commit()
+    sesi = sesi_rabu(db, b)
+
+    # Rabu 17:00-18:30 menabrak Gym (16-18) dan sesi Task 0 (18-19)
+    res = client.patch(f"{URL}/sesi/{sesi.id_jadwal}", headers=auth(user),
+                       json={"waktu_mulai": "2026-10-07T17:00:00", "waktu_selesai": "2026-10-07T18:30:00"})
+
+    assert res.status_code == 409
+    detail = res.json()["detail"]
+    assert detail["pesan"] == "Jadwal bentrok"
+    assert [(x["jenis"], x["nama"], x["waktu_mulai"], x["waktu_selesai"]) for x in detail["bentrok"]] == [
+        ("rutin", "Gym", "2026-10-07T17:00:00", "2026-10-07T18:00:00"),
+        ("task", "Task 0", "2026-10-07T18:00:00", "2026-10-07T18:30:00"),
+    ]
+    assert detail["bentrok"][0]["pesan"].startswith("Bentrok dengan Gym")
+    db.refresh(sesi)
+    assert (sesi.waktu_mulai, sesi.waktu_selesai) == (dt(7, 9), dt(7, 10))
+
+
+def test_ubah_sesi_conflict_also_blocks_status_change(client, db, data):
+    """Jika pemindahan ditolak, perubahan status di request yang sama juga tidak disimpan."""
+    user, _, (_, b) = data
+    sesi = sesi_rabu(db, b)
+    res = client.patch(f"{URL}/sesi/{sesi.id_jadwal}", headers=auth(user), json={
+        "status": "selesai", "waktu_mulai": "2026-10-06T19:00:00", "waktu_selesai": "2026-10-06T20:00:00"})
+    assert res.status_code == 409
+    db.refresh(sesi)
+    assert sesi.status == STATUS_TERJADWAL
+
+
+def test_ubah_sesi_skipped_session_cannot_be_changed(client, db, data):
+    user, _, (_, b) = data
+    dilewati = db.query(JadwalTask).filter_by(id_task=b.id_task, status=STATUS_DILEWATI).one()
+    res = client.patch(f"{URL}/sesi/{dilewati.id_jadwal}", json={"status": "selesai"}, headers=auth(user))
+    assert res.status_code == 409 and res.json()["detail"] == "Sesi yang dilewati tidak bisa diubah"
+
+
+@pytest.mark.parametrize("payload", [
+    {},                                                                    # tidak ada yang diubah
+    {"status": "dilewati"},                                                # hanya lewat susun ulang
+    {"waktu_mulai": "2026-10-08T10:00:00"},                                # waktu_selesai tidak ada
+    {"waktu_mulai": "2026-10-08T10:00:00", "waktu_selesai": "2026-10-08T10:00:00"},  # durasi nol
+])
+def test_ubah_sesi_invalid_payload(client, db, data, payload):
+    user, _, (_, b) = data
+    res = client.patch(f"{URL}/sesi/{sesi_rabu(db, b).id_jadwal}", json=payload, headers=auth(user))
+    assert res.status_code == 422
+
+
+def test_ubah_sesi_converts_timezone_to_wib(client, db, data):
+    user, _, (_, b) = data
+    sesi = sesi_rabu(db, b)
+    # 03:00 UTC = 10:00 WIB (format dari toISOString() JavaScript)
+    res = client.patch(f"{URL}/sesi/{sesi.id_jadwal}", headers=auth(user),
+                       json={"waktu_mulai": "2026-10-08T03:00:00Z", "waktu_selesai": "2026-10-08T04:00:00.000Z"})
+    assert res.status_code == 200
+    assert (res.json()["waktu_mulai"], res.json()["waktu_selesai"]) == ("2026-10-08T10:00:00", "2026-10-08T11:00:00")

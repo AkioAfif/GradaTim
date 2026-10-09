@@ -5,6 +5,7 @@ scheduler.py berisi logika murni tanpa database. Modul ini:
       lalu mengubahnya ke bentuk yang dipahami scheduler
     - menjadwalkan task sebuah goal dan menyimpan sesinya ke tabel jadwal_task  (FR-4)
     - menyusun ulang jadwal minggu ini: sesi terlewat & task yang ditunda karena mood  (FR-11)
+    - mengecek bentrok saat sesi dipindah manual  (FR-5)
 
 Fungsi di sini hanya `flush`, tidak `commit` — commit dilakukan endpoint pemanggil.
 
@@ -24,11 +25,13 @@ from app.core.config import settings
 from app.models import Agenda, Goal, JadwalTask, Milestone, Task, TaskDependency, TimeConstraint, User
 from app.services.scheduler import (
     BusyBlock,
+    Conflict,
     Interval,
     Session,
     TaskToSchedule,
     WeeklyWindow,
     busy_blocks,
+    find_conflicts,
     free_slots,
     replan,
     schedule_tasks,
@@ -342,3 +345,23 @@ def susun_ulang_minggu_ini(
         sesi_baru=sesi_baru,
         sesi_dilewati=sesi_dilewati,
     )
+
+
+# ============================================================
+# CEK BENTROK (FR-5)
+# ============================================================
+
+def cek_bentrok(db: DbSession, user: User, waktu: Interval, kecuali_id_jadwal: int | None = None) -> list[Conflict]:
+    """Bentrok `waktu` dengan kegiatan rutin, agenda, atau sesi task user.
+
+    kecuali_id_jadwal: sesi yang sedang dipindah — tidak dianggap bentrok dengan posisi lamanya.
+    Sesi task diberi label nama task-nya, bukan "Task #id".
+    """
+    konteks = muat_konteks(db, user, waktu.start, waktu.end)
+    blok = busy_blocks(waktu.start, waktu.end, konteks.rutin, konteks.agenda)
+    blok += [
+        BusyBlock(Interval(r.waktu_mulai, r.waktu_selesai), "task", r.task.nama_task)
+        for r in konteks.sesi
+        if r.id_jadwal != kecuali_id_jadwal
+    ]
+    return find_conflicts(waktu, blok)

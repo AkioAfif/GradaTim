@@ -17,6 +17,7 @@ from app.services.jadwal_service import (
     DEFAULT_DURASI_MENIT,
     agenda_user,
     awal_minggu,
+    cek_bentrok,
     jam_aktif,
     kegiatan_rutin,
     jadwalkan_goal,
@@ -477,3 +478,27 @@ def test_susun_ulang_only_touches_own_sessions_and_has_no_conflicts(db, user_len
     assert (lain.waktu_mulai, lain.status) == (dt(6, 15), STATUS_TERJADWAL)
     konteks = muat_konteks(db, user, RABU_SIANG, MINGGU_INI[1])
     assert validate_schedule(konteks.sessions, [b for b in konteks.blok_sibuk() if b.kind != "task"]) == []
+
+
+# ------------------------------------------------------------
+# CEK BENTROK (FR-5)
+# ------------------------------------------------------------
+
+def test_cek_bentrok_lists_routine_agenda_and_task_by_name(db, user_lengkap):
+    user, tasks = user_lengkap
+    # Selasa 6/10 14:00-20:00: sesi `dilewati` 15-16 tidak dihitung, rapat himpunan 19-21 dihitung
+    bentrok = cek_bentrok(db, user, Interval(dt(6, 14), dt(6, 20)))
+    assert [(b.blocking.kind, b.blocking.label, b.overlap) for b in bentrok] == [
+        ("agenda", "Rapat himpunan", Interval(dt(6, 19), dt(6, 20))),
+    ]
+    # Senin 14:00-15:30: kuliah 8-15 dan sesi task 0 (15-16)
+    bentrok = cek_bentrok(db, user, Interval(dt(5, 14), dt(5, 15, 30)))
+    assert [(b.blocking.kind, b.blocking.label) for b in bentrok] == [("rutin", "Kuliah"), ("task", "Task 0")]
+
+
+def test_cek_bentrok_ignores_session_being_moved(db, user_lengkap):
+    user, _ = user_lengkap
+    sesi_rabu = next(s for s in sesi_user(db, user, *MINGGU_INI) if s.waktu_mulai == dt(7, 15))
+    geser = Interval(dt(7, 15, 30), dt(7, 16))
+    assert [b.blocking.kind for b in cek_bentrok(db, user, geser)] == ["task"]
+    assert cek_bentrok(db, user, geser, kecuali_id_jadwal=sesi_rabu.id_jadwal) == []

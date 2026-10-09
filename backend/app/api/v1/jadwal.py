@@ -20,11 +20,19 @@ from app.schemas.jadwal import (
     HasilSusunUlangRead,
     JadwalMingguan,
     SesiRead,
+    SesiUpdate,
     SusunUlangRequest,
     TaskRingkas,
 )
-from app.services.jadwal_service import awal_minggu, jadwalkan_goal, muat_konteks, susun_ulang_minggu_ini
-from app.services.scheduler import busy_blocks
+from app.services.jadwal_service import (
+    STATUS_DILEWATI,
+    awal_minggu,
+    cek_bentrok,
+    jadwalkan_goal,
+    muat_konteks,
+    susun_ulang_minggu_ini,
+)
+from app.services.scheduler import Interval, busy_blocks
 
 router = APIRouter()
 
@@ -125,3 +133,56 @@ def susun_ulang_jadwal(
         sesi_baru=[_ke_sesi_read(r) for r in hasil.sesi_baru],
         sesi_dilewati=[_ke_sesi_read(r) for r in hasil.sesi_dilewati],
     )
+
+
+@router.patch("/sesi/{id_jadwal}", response_model=SesiRead)
+def ubah_sesi(
+    id_jadwal: int,
+    payload: SesiUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> SesiRead:
+    """Tandai sesi selesai (atau batalkan), dan/atau pindahkan sesi secara manual.
+
+    Pemindahan dicek bentrok dengan kegiatan rutin, agenda, dan sesi lain (FR-5); jika bentrok,
+    dijawab 409 dengan daftar yang ditabrak dan sesi tidak diubah. Sesi `dilewati` adalah riwayat
+    dan tidak bisa diubah.
+    """
+    row = db.scalar(
+        select(JadwalTask)
+        .join(Task, JadwalTask.id_task == Task.id_task)
+        .join(Milestone, Task.id_milestone == Milestone.id_milestone)
+        .join(Goal, Milestone.id_goal == Goal.id_goal)
+        .where(JadwalTask.id_jadwal == id_jadwal, Goal.id_user == current_user.id_user)
+    )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesi tidak ditemukan")
+    if row.status == STATUS_DILEWATI:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Sesi yang dilewati tidak bisa diubah")
+
+    if payload.waktu_mulai is not None:
+        waktu = Interval(payload.waktu_mulai, payload.waktu_selesai)
+        bentrok = cek_bentrok(db, current_user, waktu, kecuali_id_jadwal=row.id_jadwal)
+        if bentrok:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "pesan": "Jadwal bentrok",
+                    "bentrok": [
+                        {
+                            "jenis": b.blocking.kind,  # rutin | agenda | task
+                            "nama": b.blocking.label,
+                            "waktu_mulai": b.overlap.start.isoformat(),
+                            "waktu_selesai": b.overlap.end.isoformat(),
+                            "pesan": b.message,
+                        }
+                        for b in bentrok
+                    ],
+                },
+            )
+        row.waktu_mulai, row.waktu_selesai = waktu.start, waktu.end
+    if payload.status is not None:
+        row.status = payload.status
+
+    db.commit()
+    return _ke_sesi_read(row)

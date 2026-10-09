@@ -1,8 +1,13 @@
 """Pydantic request/response schemas - jadwal.py (FR-4, FR-5, FR-11)"""
 
-from datetime import datetime, time
+from datetime import datetime, time, timedelta, timezone
+from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Semua waktu di database adalah WIB tanpa timezone. Waktu dari client yang membawa timezone
+# (mis. "2026-10-07T06:00:00Z" dari toISOString() JavaScript) diubah ke WIB.
+WIB = timezone(timedelta(hours=7))
 
 
 class BlokKalender(BaseModel):
@@ -63,3 +68,28 @@ class HasilSusunUlangRead(BaseModel):
     tidak_muat: list[TaskRingkas]
     sesi_baru: list[SesiRead]
     sesi_dilewati: list[SesiRead]  # sesi terlewat, kini berstatus `dilewati` (riwayat)
+
+
+class SesiUpdate(BaseModel):
+    """Ubah satu sesi: tandai selesai / batal selesai, dan/atau pindah waktu (keduanya wajib bersama)."""
+
+    status: Optional[Literal["terjadwal", "selesai"]] = None
+    waktu_mulai: Optional[datetime] = None
+    waktu_selesai: Optional[datetime] = None
+
+    @field_validator("waktu_mulai", "waktu_selesai")
+    @classmethod
+    def ke_wib(cls, value: Optional[datetime]) -> Optional[datetime]:
+        if value is not None and value.tzinfo is not None:
+            return value.astimezone(WIB).replace(tzinfo=None)
+        return value
+
+    @model_validator(mode="after")
+    def cek_isian(self) -> "SesiUpdate":
+        if (self.waktu_mulai is None) != (self.waktu_selesai is None):
+            raise ValueError("waktu_mulai dan waktu_selesai harus diisi bersamaan")
+        if self.waktu_mulai is not None and self.waktu_selesai <= self.waktu_mulai:
+            raise ValueError("waktu_selesai harus setelah waktu_mulai")
+        if self.status is None and self.waktu_mulai is None:
+            raise ValueError("Tidak ada yang diubah")
+        return self
