@@ -229,6 +229,43 @@ def test_jadwalkan_goal_skips_done_scheduled_and_parent_tasks(db, jam_8_21):
     assert {s.id_task for s in hasil.sesi_baru} == {dilewati.id_task, anak.id_task}
 
 
+def test_jadwalkan_goal_orders_by_milestone_then_id(db, jam_8_21):
+    user, _ = buat_user(db)
+    goal = Goal(user=user, judul_goal="Belajar Git")
+    branching = Milestone(goal=goal, judul_milestone="Branching", urutan=2)
+    dasar = Milestone(goal=goal, judul_milestone="Dasar Git", urutan=1)
+    task_branching = Task(milestone=branching, nama_task="Merge", durasi_estimasi=780)
+    db.add_all([goal, branching, dasar, task_branching])
+    db.flush()
+    task_dasar = Task(milestone=dasar, nama_task="Commit", durasi_estimasi=780)  # ditambah belakangan
+    db.add(task_dasar)
+    db.flush()
+
+    jadwalkan_goal(db, user, goal, SENIN_PAGI)
+
+    # tiap task memenuhi satu hari (8-21): milestone urutan 1 dapat Senin walau id_task-nya lebih besar
+    assert sesi_tersimpan(db, task_dasar)[0].waktu_mulai < sesi_tersimpan(db, task_branching)[0].waktu_mulai
+
+
+def test_jadwalkan_goal_orders_nested_milestones_by_path(db, jam_8_21):
+    user, _ = buat_user(db)
+    goal = Goal(user=user, judul_goal="Belajar Inggris")
+    bulan1 = Milestone(goal=goal, judul_milestone="Bulan 1", tipe="bulanan", urutan=0)
+    bulan2 = Milestone(goal=goal, judul_milestone="Bulan 2", tipe="bulanan", urutan=1)
+    # urutan sub-milestone relatif terhadap induknya: "Bulan 2 › Minggu 1" (urutan 0) tetap setelah
+    # "Bulan 1 › Minggu 2" (urutan 1)
+    b2m1 = Milestone(goal=goal, parent_milestone=bulan2, judul_milestone="B2 Minggu 1", tipe="mingguan", urutan=0)
+    b1m2 = Milestone(goal=goal, parent_milestone=bulan1, judul_milestone="B1 Minggu 2", tipe="mingguan", urutan=1)
+    t_b2m1 = Task(milestone=b2m1, nama_task="Reading", durasi_estimasi=780)
+    t_b1m2 = Task(milestone=b1m2, nama_task="Tenses", durasi_estimasi=780)
+    db.add_all([goal, bulan1, bulan2, b2m1, b1m2, t_b2m1, t_b1m2])
+    db.flush()
+
+    jadwalkan_goal(db, user, goal, SENIN_PAGI)
+
+    assert sesi_tersimpan(db, t_b1m2)[0].waktu_mulai < sesi_tersimpan(db, t_b2m1)[0].waktu_mulai
+
+
 def test_jadwalkan_goal_default_duration(db, jam_8_21):
     user, _ = buat_user(db)
     goal, (task,) = buat_goal(db, user, [None])

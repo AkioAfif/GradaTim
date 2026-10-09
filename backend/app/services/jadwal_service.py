@@ -143,9 +143,21 @@ class HasilPenjadwalan:
     tidak_muat: list[int] = field(default_factory=list)  # id_task yang tidak muat sebelum batas waktu
 
 
+def _urutan_milestone(milestone: Milestone) -> tuple[tuple[int, int], ...]:
+    """Kunci urut milestone bertingkat: (urutan, id) dari milestone teratas sampai milestone ini,
+    sehingga "Bulan 1 › Minggu 2" berada sebelum "Bulan 2 › Minggu 1"."""
+    jalur = []
+    while milestone is not None:
+        jalur.append((milestone.urutan, milestone.id_milestone))
+        milestone = milestone.parent_milestone
+    return tuple(reversed(jalur))
+
+
 def task_belum_terjadwal(db: DbSession, goal: Goal) -> list[Task]:
     """Task goal yang perlu dijadwalkan: belum selesai, tidak punya sub-task (yang dikerjakan
-    sub-task-nya), dan belum punya sesi selain yang `dilewati`."""
+    sub-task-nya), dan belum punya sesi selain yang `dilewati`.
+    Diurutkan menurut urutan milestone, lalu id_task — penjadwal memakai urutan ini untuk task
+    yang sama-sama siap dikerjakan."""
     tasks = db.scalars(
         select(Task)
         .join(Milestone, Task.id_milestone == Milestone.id_milestone)
@@ -159,7 +171,8 @@ def task_belum_terjadwal(db: DbSession, goal: Goal) -> list[Task]:
             JadwalTask.status != STATUS_DILEWATI,
         )
     ).all())
-    return [t for t in tasks if t.id_task not in punya_sub and t.id_task not in sudah_terjadwal]
+    tasks = [t for t in tasks if t.id_task not in punya_sub and t.id_task not in sudah_terjadwal]
+    return sorted(tasks, key=lambda t: (_urutan_milestone(t.milestone), t.id_task))
 
 
 def prasyarat_task(db: DbSession, id_tasks: list[int]) -> dict[int, tuple[int, ...]]:

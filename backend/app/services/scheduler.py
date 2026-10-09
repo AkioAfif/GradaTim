@@ -216,17 +216,18 @@ class ScheduleResult:
 
 
 def _dependency_order(tasks: list[TaskToSchedule]) -> tuple[list[TaskToSchedule], list[int]]:
-    """Urutan topologis (prasyarat dulu); seri diurutkan menurut earliest lalu task_number.
+    """Urutan topologis (prasyarat dulu); seri diurutkan menurut earliest lalu urutan masukan.
     Task yang terlibat dependensi melingkar dikembalikan sebagai daftar kedua."""
     known = {t.task_number for t in tasks}
     pending = {t.task_number: {d for d in t.depends_on if d in known} for t in tasks}
     by_number = {t.task_number: t for t in tasks}
+    position = {t.task_number: i for i, t in enumerate(tasks)}
     ordered: list[TaskToSchedule] = []
     while pending:
         ready = [n for n, deps in pending.items() if not deps]
         if not ready:
             break
-        ready.sort(key=lambda n: (by_number[n].earliest or datetime.min, n))
+        ready.sort(key=lambda n: (by_number[n].earliest or datetime.min, position[n]))
         for n in ready:
             ordered.append(by_number[n])
             del pending[n]
