@@ -16,6 +16,7 @@ from app.core.security import create_access_token
 from app.db.base import Base
 from app.main import app as fastapi_app
 from app.models import Agenda, Goal, JadwalTask, Milestone, Task, TimeConstraint, User
+from app.services import jadwal_service
 from app.services.jadwal_service import STATUS_DILEWATI, STATUS_SELESAI, STATUS_TERJADWAL
 
 SEN, RAB = 0, 2
@@ -34,6 +35,17 @@ def db():
     session = sessionmaker(bind=engine)()
     yield session
     session.close()
+
+
+def atur_sekarang(monkeypatch, sekarang):
+    """Bekukan datetime.now() di modul endpoint."""
+
+    class JamTetap(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return sekarang
+
+    monkeypatch.setattr(jadwal_api, "datetime", JamTetap)
 
 
 @pytest.fixture
@@ -113,13 +125,7 @@ def test_lihat_jadwal_mingguan(client, data):
 
 def test_lihat_jadwal_default_this_week(client, data, monkeypatch):
     user, _, _ = data
-
-    class JamTetap(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return datetime(2026, 10, 14, 10)  # Rabu minggu depan
-
-    monkeypatch.setattr(jadwal_api, "datetime", JamTetap)
+    atur_sekarang(monkeypatch, dt(14, 10))  # Rabu minggu depan
     body = client.get(URL, headers=auth(user)).json()
 
     assert body["mulai"] == "2026-10-12T00:00:00"
@@ -131,3 +137,81 @@ def test_lihat_jadwal_default_this_week(client, data, monkeypatch):
 def test_lihat_jadwal_invalid_date(client, data):
     user, _, _ = data
     assert client.get(URL, params={"minggu": "bukan-tanggal"}, headers=auth(user)).status_code == 422
+
+
+# ------------------------------------------------------------
+# POST /jadwal/goal/{id_goal}
+# ------------------------------------------------------------
+
+@pytest.fixture
+def jam_8_21(monkeypatch):
+    monkeypatch.setattr(jadwal_service.settings, "JAM_AKTIF_MULAI", time(8))
+    monkeypatch.setattr(jadwal_service.settings, "JAM_AKTIF_SELESAI", time(21))
+
+
+def buat_goal(db, user, durasi, deadline=None):
+    goal = Goal(user=user, judul_goal="Belajar Git", deadline=deadline)
+    milestone = Milestone(goal=goal, judul_milestone="Minggu 1")
+    tasks = [Task(milestone=milestone, nama_task=f"Git {i}", durasi_estimasi=d) for i, d in enumerate(durasi)]
+    db.add_all([goal, milestone, *tasks])
+    db.commit()
+    return goal, tasks
+
+
+def test_jadwalkan_goal_requires_login(client, data):
+    _, goal, _ = data
+    assert client.post(f"{URL}/goal/{goal.id_goal}").status_code == 401
+
+
+def test_jadwalkan_goal_not_found_for_missing_or_other_users_goal(client, db, data):
+    user, _, _ = data
+    lain = db.query(User).filter_by(email="akio@example.com").one()
+    goal_lain, (task_lain,) = buat_goal(db, lain, [60])
+
+    for id_goal in (goal_lain.id_goal, 9999):
+        res = client.post(f"{URL}/goal/{id_goal}", headers=auth(user))
+        assert res.status_code == 404 and res.json()["detail"] == "Goal tidak ditemukan"
+    assert db.query(JadwalTask).filter_by(id_task=task_lain.id_task).count() == 0
+
+
+def test_jadwalkan_goal_saves_and_shows_in_calendar(client, db, data, jam_8_21, monkeypatch):
+    user, _, _ = data
+    goal, tasks = buat_goal(db, user, [60, 90])
+    atur_sekarang(monkeypatch, dt(7, 12))
+
+    res = client.post(f"{URL}/goal/{goal.id_goal}", headers=auth(user))
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["tidak_muat"] == []
+    assert {s["id_task"] for s in body["sesi_baru"]} == {t.id_task for t in tasks}
+    assert all(s["id_goal"] == goal.id_goal and s["status"] == STATUS_TERJADWAL for s in body["sesi_baru"])
+    assert all(s["waktu_mulai"] >= "2026-10-07T12:00:00" for s in body["sesi_baru"])
+
+    # tersimpan (sudah di-commit) dan muncul di kalender
+    kalender = client.get(URL, params={"minggu": "2026-10-07"}, headers=auth(user)).json()
+    id_kalender = {s["id_jadwal"] for s in kalender["sesi"]}
+    assert {s["id_jadwal"] for s in body["sesi_baru"]} <= id_kalender
+
+
+def test_jadwalkan_goal_twice_does_not_duplicate(client, db, data, jam_8_21, monkeypatch):
+    user, _, _ = data
+    goal, _ = buat_goal(db, user, [60])
+    atur_sekarang(monkeypatch, dt(7, 12))
+
+    pertama = client.post(f"{URL}/goal/{goal.id_goal}", headers=auth(user)).json()
+    kedua = client.post(f"{URL}/goal/{goal.id_goal}", headers=auth(user)).json()
+
+    assert len(pertama["sesi_baru"]) == 1
+    assert kedua == {"sesi_baru": [], "tidak_muat": []}
+
+
+def test_jadwalkan_goal_reports_tasks_that_do_not_fit(client, db, data, jam_8_21, monkeypatch):
+    user, _, _ = data
+    goal, (muat, tidak) = buat_goal(db, user, [60, 600], deadline=dt(7, 15))  # sisa 12:00-15:00
+    atur_sekarang(monkeypatch, dt(7, 12))
+
+    body = client.post(f"{URL}/goal/{goal.id_goal}", headers=auth(user)).json()
+
+    assert [s["id_task"] for s in body["sesi_baru"]] == [muat.id_task]
+    assert body["tidak_muat"] == [{"id_task": tidak.id_task, "nama_task": "Git 1"}]

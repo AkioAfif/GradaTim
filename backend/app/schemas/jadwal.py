@@ -35,3 +35,16 @@ class JadwalMingguan(BaseModel):
     kegiatan_rutin: list[BlokKalender]
     agenda: list[BlokKalender]
     sesi: list[SesiRead]
+
+
+class TaskTidakMuat(BaseModel):
+    id_task: int
+    nama_task: str
+
+
+class HasilPenjadwalanRead(BaseModel):
+    """Hasil penjadwalan otomatis satu goal (FR-4)."""
+
+    sesi_baru: list[SesiRead]
+    # task yang tidak muat sebelum akhir minggu / deadline goal — tidak dijadwalkan sama sekali
+    tidak_muat: list[TaskTidakMuat]

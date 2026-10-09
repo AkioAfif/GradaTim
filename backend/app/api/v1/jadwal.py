@@ -7,14 +7,14 @@ mengurus request/response dan commit.
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
 from app.core.config import settings
-from app.models import JadwalTask, User
-from app.schemas.jadwal import BlokKalender, JadwalMingguan, SesiRead
-from app.services.jadwal_service import awal_minggu, muat_konteks
+from app.models import Goal, JadwalTask, Task, User
+from app.schemas.jadwal import BlokKalender, HasilPenjadwalanRead, JadwalMingguan, SesiRead, TaskTidakMuat
+from app.services.jadwal_service import awal_minggu, jadwalkan_goal, muat_konteks
 from app.services.scheduler import busy_blocks
 
 router = APIRouter()
@@ -54,4 +54,29 @@ def lihat_jadwal_mingguan(
         agenda=[BlokKalender(nama=b.label, waktu_mulai=b.interval.start, waktu_selesai=b.interval.end)
                 for b in sorted(konteks.agenda, key=lambda b: b.interval.start)],
         sesi=[_ke_sesi_read(r) for r in konteks.sesi],
+    )
+
+
+@router.post("/goal/{id_goal}", response_model=HasilPenjadwalanRead)
+def jadwalkan_task_goal(
+    id_goal: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> HasilPenjadwalanRead:
+    """Jadwalkan otomatis task goal yang belum terjadwal ke slot luang minggu ini (FR-4).
+
+    Aman dipanggil berulang: task yang sudah punya sesi tidak dijadwalkan lagi. Task yang tidak
+    muat sampai akhir minggu (atau deadline goal) dikembalikan di `tidak_muat`.
+    """
+    goal = db.get(Goal, id_goal)
+    if goal is None or goal.id_user != current_user.id_user:
+        # goal milik user lain dijawab sama dengan goal yang tidak ada
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Goal tidak ditemukan")
+
+    hasil = jadwalkan_goal(db, current_user, goal, datetime.now())
+    db.commit()
+    tidak_muat = [db.get(Task, id_task) for id_task in hasil.tidak_muat]
+    return HasilPenjadwalanRead(
+        sesi_baru=[_ke_sesi_read(r) for r in hasil.sesi_baru],
+        tidak_muat=[TaskTidakMuat(id_task=t.id_task, nama_task=t.nama_task) for t in tidak_muat],
     )
