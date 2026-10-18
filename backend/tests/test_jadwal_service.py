@@ -7,13 +7,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401 — daftarkan semua tabel ke Base.metadata
+from app.core.status import JADWAL_DILEWATI, JADWAL_SELESAI, JADWAL_TERJADWAL, TASK_DONE
 from app.db.base import Base
 from app.models import Agenda, Goal, JadwalTask, Milestone, Task, TaskDependency, TimeConstraint, User
 from app.services import jadwal_service
 from app.services.jadwal_service import (
-    STATUS_DILEWATI,
-    STATUS_SELESAI,
-    STATUS_TERJADWAL,
     DEFAULT_DURASI_MENIT,
     agenda_user,
     awal_minggu,
@@ -64,10 +62,10 @@ def user_lengkap(db):
         TimeConstraint(user=user, nama="Gym", hari_dalam_minggu=RAB, waktu_mulai=time(16), waktu_selesai=time(18)),
         Agenda(user=user, nama="Rapat himpunan", waktu_mulai=dt(6, 19), waktu_selesai=dt(6, 21)),
         Agenda(user=user, nama="Agenda minggu depan", waktu_mulai=dt(13, 19), waktu_selesai=dt(13, 21)),
-        JadwalTask(task=tasks[0], waktu_mulai=dt(5, 15), waktu_selesai=dt(5, 16), status=STATUS_SELESAI),
-        JadwalTask(task=tasks[1], waktu_mulai=dt(6, 15), waktu_selesai=dt(6, 16), status=STATUS_DILEWATI),
-        JadwalTask(task=tasks[1], waktu_mulai=dt(7, 15), waktu_selesai=dt(7, 16), status=STATUS_TERJADWAL),
-        JadwalTask(task=tasks[2], waktu_mulai=dt(14, 15), waktu_selesai=dt(14, 16), status=STATUS_TERJADWAL),
+        JadwalTask(task=tasks[0], waktu_mulai=dt(5, 15), waktu_selesai=dt(5, 16), status=JADWAL_SELESAI),
+        JadwalTask(task=tasks[1], waktu_mulai=dt(6, 15), waktu_selesai=dt(6, 16), status=JADWAL_DILEWATI),
+        JadwalTask(task=tasks[1], waktu_mulai=dt(7, 15), waktu_selesai=dt(7, 16), status=JADWAL_TERJADWAL),
+        JadwalTask(task=tasks[2], waktu_mulai=dt(14, 15), waktu_selesai=dt(14, 16), status=JADWAL_TERJADWAL),
     ])
 
     lain, tasks_lain = buat_user(db, email="akio@example.com")
@@ -197,7 +195,7 @@ def test_jadwalkan_goal_saves_sessions_within_week(db, user_lengkap, jam_8_21):
     assert hasil.tidak_muat == []
     assert {s.id_task for s in hasil.sesi_baru} == {t.id_task for t in tasks}
     for s in hasil.sesi_baru:
-        assert s.id_jadwal is not None and s.status == STATUS_TERJADWAL
+        assert s.id_jadwal is not None and s.status == JADWAL_TERJADWAL
         assert SENIN_PAGI <= s.waktu_mulai and s.waktu_selesai <= MINGGU_INI[1]
     for t in tasks:
         assert sum((s.waktu_selesai - s.waktu_mulai).seconds // 60 for s in sesi_tersimpan(db, t)) == t.durasi_estimasi
@@ -216,11 +214,11 @@ def test_jadwalkan_goal_no_conflict_with_routines_agenda_and_other_sessions(db, 
 def test_jadwalkan_goal_skips_done_scheduled_and_parent_tasks(db, jam_8_21):
     user, _ = buat_user(db)
     goal, (selesai, terjadwal, dilewati, induk, anak) = buat_goal(db, user, [60] * 5)
-    selesai.status = "done"
+    selesai.status = TASK_DONE
     anak.parent_task = induk
     db.add_all([
-        JadwalTask(task=terjadwal, waktu_mulai=dt(14, 9), waktu_selesai=dt(14, 10), status=STATUS_TERJADWAL),
-        JadwalTask(task=dilewati, waktu_mulai=dt(2, 9), waktu_selesai=dt(2, 10), status=STATUS_DILEWATI),
+        JadwalTask(task=terjadwal, waktu_mulai=dt(14, 9), waktu_selesai=dt(14, 10), status=JADWAL_TERJADWAL),
+        JadwalTask(task=dilewati, waktu_mulai=dt(2, 9), waktu_selesai=dt(2, 10), status=JADWAL_DILEWATI),
     ])
     db.flush()
 
@@ -292,7 +290,7 @@ def test_jadwalkan_goal_waits_for_already_scheduled_prerequisite(db, jam_8_21):
     user, _ = buat_user(db)
     goal, (prasyarat, task) = buat_goal(db, user, [60, 60])
     db.add_all([
-        JadwalTask(task=prasyarat, waktu_mulai=dt(8, 9), waktu_selesai=dt(8, 10), status=STATUS_TERJADWAL),
+        JadwalTask(task=prasyarat, waktu_mulai=dt(8, 9), waktu_selesai=dt(8, 10), status=JADWAL_TERJADWAL),
         TaskDependency(task=task, task_prasyarat=prasyarat),
     ])
     db.flush()
@@ -307,7 +305,7 @@ def test_jadwalkan_goal_prerequisite_scheduled_next_week_means_not_fit(db, jam_8
     user, _ = buat_user(db)
     goal, (prasyarat, task) = buat_goal(db, user, [60, 60])
     db.add_all([
-        JadwalTask(task=prasyarat, waktu_mulai=dt(13, 9), waktu_selesai=dt(13, 10), status=STATUS_TERJADWAL),
+        JadwalTask(task=prasyarat, waktu_mulai=dt(13, 9), waktu_selesai=dt(13, 10), status=JADWAL_TERJADWAL),
         TaskDependency(task=task, task_prasyarat=prasyarat),
     ])
     db.flush()
@@ -321,7 +319,7 @@ def test_jadwalkan_goal_counts_existing_load(db, jam_8_21):
     """Hari yang sudah padat oleh goal lain tidak ditambah lagi (beban merata, D5)."""
     user, _ = buat_user(db)
     lain, (sibuk,) = buat_goal(db, user, [480])
-    db.add(JadwalTask(task=sibuk, waktu_mulai=dt(5, 9), waktu_selesai=dt(5, 17), status=STATUS_TERJADWAL))
+    db.add(JadwalTask(task=sibuk, waktu_mulai=dt(5, 9), waktu_selesai=dt(5, 17), status=JADWAL_TERJADWAL))
     goal, _ = buat_goal(db, user, [60, 60])
     db.flush()
 
@@ -354,7 +352,7 @@ def test_jadwalkan_goal_deadline_passed_saves_nothing(db, jam_8_21):
 def test_jadwalkan_goal_nothing_to_schedule(db, jam_8_21):
     user, _ = buat_user(db)
     goal, (task,) = buat_goal(db, user, [60])
-    task.status = "done"
+    task.status = TASK_DONE
 
     hasil = jadwalkan_goal(db, user, goal, SENIN_PAGI)
 
@@ -377,13 +375,13 @@ def test_jadwalkan_goal_rejects_other_users_goal(db):
 RABU_SIANG = dt(7, 12)
 
 
-def sesi(task, mulai, selesai, status=STATUS_TERJADWAL):
+def sesi(task, mulai, selesai, status=JADWAL_TERJADWAL):
     return JadwalTask(task=task, waktu_mulai=mulai, waktu_selesai=selesai, status=status)
 
 
 def test_susun_ulang_nothing_missed_changes_nothing(db, jam_8_21):
     user, (a, b, _) = buat_user(db)
-    db.add_all([sesi(a, dt(5, 9), dt(5, 10), STATUS_SELESAI), sesi(b, dt(8, 9), dt(8, 10))])
+    db.add_all([sesi(a, dt(5, 9), dt(5, 10), JADWAL_SELESAI), sesi(b, dt(8, 9), dt(8, 10))])
     db.flush()
 
     hasil = susun_ulang_minggu_ini(db, user, RABU_SIANG)
@@ -402,14 +400,14 @@ def test_susun_ulang_missed_session_kept_as_history_and_rescheduled(db, jam_8_21
     hasil = susun_ulang_minggu_ini(db, user, RABU_SIANG)
 
     assert hasil.dipindah == [a.id_task] and hasil.tidak_muat == []
-    assert hasil.sesi_dilewati == [terlewat] and terlewat.status == STATUS_DILEWATI
-    assert [(s.id_task, s.status) for s in hasil.sesi_baru] == [(a.id_task, STATUS_TERJADWAL)]
+    assert hasil.sesi_dilewati == [terlewat] and terlewat.status == JADWAL_DILEWATI
+    assert [(s.id_task, s.status) for s in hasil.sesi_baru] == [(a.id_task, JADWAL_TERJADWAL)]
     baru = hasil.sesi_baru[0]
     assert baru.id_jadwal is not None
     assert RABU_SIANG <= baru.waktu_mulai and baru.waktu_selesai <= MINGGU_INI[1]
     assert baru.waktu_selesai - baru.waktu_mulai == terlewat.waktu_selesai - terlewat.waktu_mulai
     # sesi lain yang masih valid tidak disentuh
-    assert (tetap.waktu_mulai, tetap.status) == (dt(8, 9), STATUS_TERJADWAL)
+    assert (tetap.waktu_mulai, tetap.status) == (dt(8, 9), JADWAL_TERJADWAL)
 
 
 def test_susun_ulang_moves_dependent_sessions(db, jam_8_21):
@@ -424,7 +422,7 @@ def test_susun_ulang_moves_dependent_sessions(db, jam_8_21):
     hasil = susun_ulang_minggu_ini(db, user, RABU_SIANG)
 
     assert hasil.dipindah == sorted([a.id_task, b.id_task])
-    assert [s.status for s in sesi_tersimpan(db, a)] == [STATUS_DILEWATI, STATUS_TERJADWAL]
+    assert [s.status for s in sesi_tersimpan(db, a)] == [JADWAL_DILEWATI, JADWAL_TERJADWAL]
     (sesi_b,) = sesi_tersimpan(db, b)  # sesi lama b dihapus, bukan ditandai dilewati
     assert sesi_tersimpan(db, a)[-1].waktu_selesai <= sesi_b.waktu_mulai
 
@@ -438,20 +436,20 @@ def test_susun_ulang_deferred_task_moves_to_tomorrow(db, jam_8_21):
 
     assert hasil.dipindah == [a.id_task] and hasil.sesi_dilewati == []
     (sesi_a,) = sesi_tersimpan(db, a)
-    assert sesi_a.waktu_mulai >= dt(8, 0) and sesi_a.status == STATUS_TERJADWAL
+    assert sesi_a.waktu_mulai >= dt(8, 0) and sesi_a.status == JADWAL_TERJADWAL
     assert [s.waktu_mulai for s in sesi_tersimpan(db, b)] == [dt(7, 17)]
 
 
 def test_susun_ulang_ignores_sessions_of_done_tasks(db, jam_8_21):
     user, (a, _, _) = buat_user(db)
-    a.status = "done"  # task ditandai selesai walau sesinya tidak ditandai
+    a.status = TASK_DONE  # task ditandai selesai walau sesinya tidak ditandai
     db.add(sesi(a, dt(6, 9), dt(6, 10)))
     db.flush()
 
     hasil = susun_ulang_minggu_ini(db, user, RABU_SIANG)
 
     assert hasil.dipindah == [] and hasil.sesi_baru == []
-    assert [s.status for s in sesi_tersimpan(db, a)] == [STATUS_TERJADWAL]
+    assert [s.status for s in sesi_tersimpan(db, a)] == [JADWAL_TERJADWAL]
 
 
 def test_susun_ulang_reports_tasks_that_no_longer_fit(db, jam_8_21):
@@ -463,7 +461,7 @@ def test_susun_ulang_reports_tasks_that_no_longer_fit(db, jam_8_21):
     hasil = susun_ulang_minggu_ini(db, user, dt(11, 20, 30))  # Minggu 20:30, sisa 30 menit
 
     assert hasil.tidak_muat == [a.id_task] and hasil.dipindah == [] and hasil.sesi_baru == []
-    assert terlewat.status == STATUS_DILEWATI
+    assert terlewat.status == JADWAL_DILEWATI
 
 
 def test_susun_ulang_only_touches_own_sessions_and_has_no_conflicts(db, user_lengkap, jam_8_21):
@@ -475,7 +473,7 @@ def test_susun_ulang_only_touches_own_sessions_and_has_no_conflicts(db, user_len
     hasil = susun_ulang_minggu_ini(db, user, RABU_SIANG)
 
     assert hasil.dipindah == [tasks[2].id_task]
-    assert (lain.waktu_mulai, lain.status) == (dt(6, 15), STATUS_TERJADWAL)
+    assert (lain.waktu_mulai, lain.status) == (dt(6, 15), JADWAL_TERJADWAL)
     konteks = muat_konteks(db, user, RABU_SIANG, MINGGU_INI[1])
     assert validate_schedule(konteks.sessions, [b for b in konteks.blok_sibuk() if b.kind != "task"]) == []
 

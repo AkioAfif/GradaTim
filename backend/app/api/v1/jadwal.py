@@ -12,7 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_db
+from app.core import waktu
 from app.core.config import settings
+from app.core.status import JADWAL_DILEWATI
 from app.models import Goal, JadwalTask, Milestone, Task, User
 from app.schemas.jadwal import (
     BlokKalender,
@@ -25,7 +27,6 @@ from app.schemas.jadwal import (
     TaskRingkas,
 )
 from app.services.jadwal_service import (
-    STATUS_DILEWATI,
     awal_minggu,
     cek_bentrok,
     jadwalkan_goal,
@@ -35,6 +36,11 @@ from app.services.jadwal_service import (
 from app.services.scheduler import Interval, busy_blocks
 
 router = APIRouter()
+
+
+def _sekarang() -> datetime:
+    """Waktu sekarang di WIB (naive). Jam server tidak dipakai: di container Docker jam server = UTC."""
+    return waktu.ke_wib_naif(datetime.now(waktu.WIB))
 
 
 def _ke_sesi_read(row: JadwalTask) -> SesiRead:
@@ -61,7 +67,7 @@ def lihat_jadwal_mingguan(
 ) -> JadwalMingguan:
     """Isi kalender satu minggu (Senin–Minggu): kegiatan rutin, agenda, dan sesi task.
     Sesi berstatus `dilewati` tidak ditampilkan (hanya riwayat)."""
-    mulai = awal_minggu(datetime.combine(minggu, datetime.min.time()) if minggu else datetime.now())
+    mulai = awal_minggu(datetime.combine(minggu, datetime.min.time()) if minggu else _sekarang())
     akhir = mulai + timedelta(days=7)
     konteks = muat_konteks(db, current_user, mulai, akhir)
     blok_rutin = busy_blocks(mulai, akhir, routines=konteks.rutin)
@@ -94,7 +100,7 @@ def jadwalkan_task_goal(
         # goal milik user lain dijawab sama dengan goal yang tidak ada
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Goal tidak ditemukan")
 
-    hasil = jadwalkan_goal(db, current_user, goal, datetime.now())
+    hasil = jadwalkan_goal(db, current_user, goal, _sekarang())
     db.commit()
     return HasilPenjadwalanRead(
         sesi_baru=[_ke_sesi_read(r) for r in hasil.sesi_baru],
@@ -125,7 +131,7 @@ def susun_ulang_jadwal(
         if ditunda - milik_user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task tidak ditemukan")
 
-    hasil = susun_ulang_minggu_ini(db, current_user, datetime.now(), ditunda=sorted(ditunda))
+    hasil = susun_ulang_minggu_ini(db, current_user, _sekarang(), ditunda=sorted(ditunda))
     db.commit()
     return HasilSusunUlangRead(
         dipindah=_task_ringkas(db, hasil.dipindah),
@@ -157,7 +163,7 @@ def ubah_sesi(
     )
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesi tidak ditemukan")
-    if row.status == STATUS_DILEWATI:
+    if row.status == JADWAL_DILEWATI:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Sesi yang dilewati tidak bisa diubah")
 
     if payload.waktu_mulai is not None:

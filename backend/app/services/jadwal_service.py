@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app.core.config import settings
+from app.core.status import JADWAL_DILEWATI, JADWAL_SELESAI, JADWAL_TERJADWAL, TASK_DONE
 from app.models import Agenda, Goal, JadwalTask, Milestone, Task, TaskDependency, TimeConstraint, User
 from app.services.scheduler import (
     BusyBlock,
@@ -38,12 +39,7 @@ from app.services.scheduler import (
     subtract_intervals,
 )
 
-# Nilai kolom jadwal_task.status. Sesi `dilewati` hanya riwayat — tidak dianggap sibuk & tidak dijadwalkan ulang lagi.
-STATUS_TERJADWAL = "terjadwal"
-STATUS_SELESAI = "selesai"
-STATUS_DILEWATI = "dilewati"
-
-TASK_STATUS_DONE = "done"  # Task.status yang berarti task selesai
+# Sesi `dilewati` hanya riwayat — tidak dianggap sibuk & tidak dijadwalkan ulang lagi.
 DEFAULT_DURASI_MENIT = 30  # untuk task tanpa durasi_estimasi
 
 
@@ -89,7 +85,7 @@ def sesi_user(db: DbSession, user: User, mulai: datetime, akhir: datetime) -> li
         .join(Goal, Milestone.id_goal == Goal.id_goal)
         .where(
             Goal.id_user == user.id_user,
-            JadwalTask.status != STATUS_DILEWATI,
+            JadwalTask.status != JADWAL_DILEWATI,
             JadwalTask.waktu_selesai > mulai,
             JadwalTask.waktu_mulai < akhir,
         )
@@ -99,7 +95,7 @@ def sesi_user(db: DbSession, user: User, mulai: datetime, akhir: datetime) -> li
 
 def ke_session(row: JadwalTask) -> Session:
     """Baris jadwal_task → Session milik scheduler (task_number = id_task)."""
-    return Session(row.id_task, Interval(row.waktu_mulai, row.waktu_selesai), done=row.status == STATUS_SELESAI)
+    return Session(row.id_task, Interval(row.waktu_mulai, row.waktu_selesai), done=row.status == JADWAL_SELESAI)
 
 
 @dataclass
@@ -164,14 +160,14 @@ def task_belum_terjadwal(db: DbSession, goal: Goal) -> list[Task]:
     tasks = db.scalars(
         select(Task)
         .join(Milestone, Task.id_milestone == Milestone.id_milestone)
-        .where(Milestone.id_goal == goal.id_goal, Task.status != TASK_STATUS_DONE)
+        .where(Milestone.id_goal == goal.id_goal, Task.status != TASK_DONE)
         .order_by(Task.id_task)
     ).all()
     punya_sub = set(db.scalars(select(Task.id_parent_task).where(Task.id_parent_task.is_not(None))).all())
     sudah_terjadwal = set(db.scalars(
         select(JadwalTask.id_task).where(
             JadwalTask.id_task.in_([t.id_task for t in tasks]),
-            JadwalTask.status != STATUS_DILEWATI,
+            JadwalTask.status != JADWAL_DILEWATI,
         )
     ).all())
     tasks = [t for t in tasks if t.id_task not in punya_sub and t.id_task not in sudah_terjadwal]
@@ -194,8 +190,8 @@ def _selesai_prasyarat_luar(db: DbSession, id_tasks: set[int]) -> dict[int, date
         .join(Task, JadwalTask.id_task == Task.id_task)
         .where(
             JadwalTask.id_task.in_(id_tasks),
-            JadwalTask.status != STATUS_DILEWATI,
-            Task.status != TASK_STATUS_DONE,
+            JadwalTask.status != JADWAL_DILEWATI,
+            Task.status != TASK_DONE,
         )
     ).all()
     akhir: dict[int, datetime] = {}
@@ -260,7 +256,7 @@ def jadwalkan_goal(db: DbSession, user: User, goal: Goal, sekarang: datetime) ->
 
     sesi_baru = [
         JadwalTask(id_task=s.task_number, waktu_mulai=s.interval.start, waktu_selesai=s.interval.end,
-                   status=STATUS_TERJADWAL)
+                   status=JADWAL_TERJADWAL)
         for s in hasil.sessions
     ]
     db.add_all(sesi_baru)
@@ -302,7 +298,7 @@ def susun_ulang_minggu_ini(
         return HasilSusunUlang()
 
     def ke_session_replan(row: JadwalTask) -> Session:
-        done = row.status == STATUS_SELESAI or row.task.status == TASK_STATUS_DONE
+        done = row.status == JADWAL_SELESAI or row.task.status == TASK_DONE
         return Session(row.id_task, Interval(row.waktu_mulai, row.waktu_selesai), done=done)
 
     sessions = [ke_session_replan(r) for r in rows]
@@ -327,14 +323,14 @@ def susun_ulang_minggu_ini(
     sesi_dilewati = []
     for row in dipindah:
         if row.waktu_selesai <= sekarang:
-            row.status = STATUS_DILEWATI
+            row.status = JADWAL_DILEWATI
             sesi_dilewati.append(row)
         else:
             db.delete(row)
 
     sesi_baru = [
         JadwalTask(id_task=s.task_number, waktu_mulai=s.interval.start, waktu_selesai=s.interval.end,
-                   status=STATUS_TERJADWAL)
+                   status=JADWAL_TERJADWAL)
         for s in sorted(sisa.elements(), key=lambda s: s.interval.start)
     ]
     db.add_all(sesi_baru)

@@ -38,6 +38,7 @@ import uvicorn  # noqa: E402
 
 import app.models  # noqa: E402,F401 — daftarkan semua tabel ke Base.metadata
 from app.core.security import create_access_token, hash_password  # noqa: E402
+from app.core.status import JADWAL_TERJADWAL  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.db.session import SessionLocal, engine  # noqa: E402
 from app.main import app as fastapi_app  # noqa: E402
@@ -81,7 +82,7 @@ def isi_data_demo(db, sekarang: datetime) -> tuple[User, Goal, Goal]:
     t_git = Task(milestone=m_git, nama_task="Latihan commit & branch", durasi_estimasi=60)
     db.add_all([git, m_git, t_git])
     lalu = max((sekarang - timedelta(hours=3)).replace(minute=0, second=0, microsecond=0), awal_minggu(sekarang))
-    db.add(JadwalTask(task=t_git, waktu_mulai=lalu, waktu_selesai=lalu + timedelta(hours=1), status="terjadwal"))
+    db.add(JadwalTask(task=t_git, waktu_mulai=lalu, waktu_selesai=lalu + timedelta(hours=1), status=JADWAL_TERJADWAL))
 
     db.commit()
     return user, docker, git

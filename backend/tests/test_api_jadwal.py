@@ -1,6 +1,6 @@
 """Test endpoint /api/v1/jadwal (database SQLite in-memory, token JWT asli)"""
 
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,11 +13,11 @@ from app.api.deps import get_db
 from app.api.v1 import jadwal as jadwal_api
 from app.core.config import settings
 from app.core.security import create_access_token
+from app.core.status import JADWAL_DILEWATI, JADWAL_SELESAI, JADWAL_TERJADWAL
 from app.db.base import Base
 from app.main import app as fastapi_app
 from app.models import Agenda, Goal, JadwalTask, Milestone, Task, TimeConstraint, User
 from app.services import jadwal_service
-from app.services.jadwal_service import STATUS_DILEWATI, STATUS_SELESAI, STATUS_TERJADWAL
 
 SEN, RAB = 0, 2
 URL = "/api/v1/jadwal"
@@ -77,9 +77,9 @@ def data(db):
         TimeConstraint(user=user, nama="Gym", hari_dalam_minggu=RAB, waktu_mulai=time(16), waktu_selesai=time(18)),
         Agenda(user=user, nama="Rapat himpunan", waktu_mulai=dt(6, 19), waktu_selesai=dt(6, 21)),
         Agenda(user=user, nama="Agenda minggu depan", waktu_mulai=dt(13, 19), waktu_selesai=dt(13, 21)),
-        JadwalTask(task=a, waktu_mulai=dt(5, 15), waktu_selesai=dt(5, 16), status=STATUS_SELESAI),
-        JadwalTask(task=b, waktu_mulai=dt(6, 15), waktu_selesai=dt(6, 16), status=STATUS_DILEWATI),
-        JadwalTask(task=b, waktu_mulai=dt(7, 9), waktu_selesai=dt(7, 10), status=STATUS_TERJADWAL),
+        JadwalTask(task=a, waktu_mulai=dt(5, 15), waktu_selesai=dt(5, 16), status=JADWAL_SELESAI),
+        JadwalTask(task=b, waktu_mulai=dt(6, 15), waktu_selesai=dt(6, 16), status=JADWAL_DILEWATI),
+        JadwalTask(task=b, waktu_mulai=dt(7, 9), waktu_selesai=dt(7, 10), status=JADWAL_TERJADWAL),
     ])
     lain, _, (tugas_lain, _) = buat_user(db, email="akio@example.com")
     db.add_all([
@@ -116,8 +116,8 @@ def test_lihat_jadwal_mingguan(client, data):
     ]
     # sesi `dilewati` dan sesi milik user lain tidak ikut
     assert [(s["id_task"], s["status"], s["waktu_mulai"]) for s in body["sesi"]] == [
-        (a.id_task, STATUS_SELESAI, "2026-10-05T15:00:00"),
-        (b.id_task, STATUS_TERJADWAL, "2026-10-07T09:00:00"),
+        (a.id_task, JADWAL_SELESAI, "2026-10-05T15:00:00"),
+        (b.id_task, JADWAL_TERJADWAL, "2026-10-07T09:00:00"),
     ]
     assert body["sesi"][0]["nama_task"] == "Task 0" and body["sesi"][0]["id_goal"] == goal.id_goal
     assert body["sesi"][0]["id_jadwal"] > 0
@@ -133,6 +133,18 @@ def test_lihat_jadwal_default_this_week(client, data, monkeypatch):
     assert body["sesi"] == []
     assert [r["nama"] for r in body["kegiatan_rutin"]] == ["Kuliah", "Gym"]  # rutin muncul tiap minggu
 
+
+def test_lihat_jadwal_default_pakai_jam_wib_bukan_jam_server(client, data, monkeypatch):
+    user, _, _ = data
+
+    class JamServerUtc(datetime):  # server Docker berjalan di UTC
+        @classmethod
+        def now(cls, tz=None):
+            utc = datetime(2026, 10, 11, 18, 0, tzinfo=timezone.utc)  # Minggu 18:00 UTC = Senin 01:00 WIB
+            return utc.astimezone(tz) if tz else utc.replace(tzinfo=None)
+
+    monkeypatch.setattr(jadwal_api, "datetime", JamServerUtc)
+    assert client.get(URL, headers=auth(user)).json()["mulai"] == "2026-10-12T00:00:00"
 
 def test_lihat_jadwal_invalid_date(client, data):
     user, _, _ = data
@@ -185,7 +197,7 @@ def test_jadwalkan_goal_saves_and_shows_in_calendar(client, db, data, jam_8_21, 
     body = res.json()
     assert body["tidak_muat"] == []
     assert {s["id_task"] for s in body["sesi_baru"]} == {t.id_task for t in tasks}
-    assert all(s["id_goal"] == goal.id_goal and s["status"] == STATUS_TERJADWAL for s in body["sesi_baru"])
+    assert all(s["id_goal"] == goal.id_goal and s["status"] == JADWAL_TERJADWAL for s in body["sesi_baru"])
     assert all(s["waktu_mulai"] >= "2026-10-07T12:00:00" for s in body["sesi_baru"])
 
     # tersimpan (sudah di-commit) dan muncul di kalender
@@ -240,7 +252,7 @@ def test_susun_ulang_without_body_moves_missed_sessions(client, db, data, jam_8_
     assert body["dipindah"] == [{"id_task": b.id_task, "nama_task": "Task 1"}]
     assert body["tidak_muat"] == []
     assert [(s["status"], s["waktu_mulai"]) for s in body["sesi_dilewati"]] == [
-        (STATUS_DILEWATI, "2026-10-07T09:00:00")]
+        (JADWAL_DILEWATI, "2026-10-07T09:00:00")]
     (baru,) = body["sesi_baru"]
     assert baru["id_task"] == b.id_task and baru["waktu_mulai"] >= "2026-10-07T12:00:00"
 
@@ -260,7 +272,7 @@ def test_susun_ulang_deferred_task_moves_to_tomorrow(client, db, data, jam_8_21,
     assert [t["id_task"] for t in body["dipindah"]] == [b.id_task]
     assert body["sesi_dilewati"] == []
     assert all(s["waktu_mulai"] >= "2026-10-08T00:00:00" for s in body["sesi_baru"])
-    assert all(s.waktu_mulai >= dt(8, 0) for s in sesi_task(db, b) if s.status == STATUS_TERJADWAL)
+    assert all(s.waktu_mulai >= dt(8, 0) for s in sesi_task(db, b) if s.status == JADWAL_TERJADWAL)
 
 
 def test_susun_ulang_rejects_other_users_or_unknown_task(client, db, data, monkeypatch):
@@ -272,7 +284,7 @@ def test_susun_ulang_rejects_other_users_or_unknown_task(client, db, data, monke
         res = client.post(f"{URL}/susun-ulang", json={"ditunda": ditunda}, headers=auth(user))
         assert res.status_code == 404 and res.json()["detail"] == "Task tidak ditemukan"
     # tidak ada yang berubah, termasuk sesi b yang sebenarnya sudah terlewat
-    assert [s.status for s in sesi_task(db, b)] == [STATUS_DILEWATI, STATUS_TERJADWAL]
+    assert [s.status for s in sesi_task(db, b)] == [JADWAL_DILEWATI, JADWAL_TERJADWAL]
 
 
 def test_susun_ulang_reports_tasks_that_no_longer_fit(client, db, data, jam_8_21, monkeypatch):
@@ -292,7 +304,7 @@ def test_susun_ulang_reports_tasks_that_no_longer_fit(client, db, data, jam_8_21
 
 def sesi_rabu(db, b):
     """Sesi task b Rabu 09:00-10:00 (`terjadwal`) dari fixture `data`."""
-    return db.query(JadwalTask).filter_by(id_task=b.id_task, status=STATUS_TERJADWAL).one()
+    return db.query(JadwalTask).filter_by(id_task=b.id_task, status=JADWAL_TERJADWAL).one()
 
 
 def test_ubah_sesi_requires_login(client, db, data):
@@ -308,7 +320,7 @@ def test_ubah_sesi_not_found_for_other_users_or_missing_session(client, db, data
         res = client.patch(f"{URL}/sesi/{id_jadwal}", json={"status": "selesai"}, headers=auth(user))
         assert res.status_code == 404 and res.json()["detail"] == "Sesi tidak ditemukan"
     db.refresh(sesi_lain)
-    assert sesi_lain.status == STATUS_TERJADWAL
+    assert sesi_lain.status == JADWAL_TERJADWAL
 
 
 def test_ubah_sesi_mark_done_and_undo(client, db, data):
@@ -317,11 +329,11 @@ def test_ubah_sesi_mark_done_and_undo(client, db, data):
     url = f"{URL}/sesi/{sesi.id_jadwal}"
 
     res = client.patch(url, json={"status": "selesai"}, headers=auth(user))
-    assert res.status_code == 200 and res.json()["status"] == STATUS_SELESAI
+    assert res.status_code == 200 and res.json()["status"] == JADWAL_SELESAI
     db.refresh(sesi)
-    assert sesi.status == STATUS_SELESAI
+    assert sesi.status == JADWAL_SELESAI
 
-    assert client.patch(url, json={"status": "terjadwal"}, headers=auth(user)).json()["status"] == STATUS_TERJADWAL
+    assert client.patch(url, json={"status": "terjadwal"}, headers=auth(user)).json()["status"] == JADWAL_TERJADWAL
 
 
 def test_ubah_sesi_move_without_conflict(client, db, data):
@@ -334,7 +346,7 @@ def test_ubah_sesi_move_without_conflict(client, db, data):
     assert res.status_code == 200
     assert (res.json()["waktu_mulai"], res.json()["waktu_selesai"]) == ("2026-10-08T10:00:00", "2026-10-08T11:30:00")
     db.refresh(sesi)
-    assert (sesi.waktu_mulai, sesi.waktu_selesai, sesi.status) == (dt(8, 10), dt(8, 11, 30), STATUS_TERJADWAL)
+    assert (sesi.waktu_mulai, sesi.waktu_selesai, sesi.status) == (dt(8, 10), dt(8, 11, 30), JADWAL_TERJADWAL)
 
 
 def test_ubah_sesi_shift_overlapping_its_old_position_is_allowed(client, db, data):
@@ -375,12 +387,12 @@ def test_ubah_sesi_conflict_also_blocks_status_change(client, db, data):
         "status": "selesai", "waktu_mulai": "2026-10-06T19:00:00", "waktu_selesai": "2026-10-06T20:00:00"})
     assert res.status_code == 409
     db.refresh(sesi)
-    assert sesi.status == STATUS_TERJADWAL
+    assert sesi.status == JADWAL_TERJADWAL
 
 
 def test_ubah_sesi_skipped_session_cannot_be_changed(client, db, data):
     user, _, (_, b) = data
-    dilewati = db.query(JadwalTask).filter_by(id_task=b.id_task, status=STATUS_DILEWATI).one()
+    dilewati = db.query(JadwalTask).filter_by(id_task=b.id_task, status=JADWAL_DILEWATI).one()
     res = client.patch(f"{URL}/sesi/{dilewati.id_jadwal}", json={"status": "selesai"}, headers=auth(user))
     assert res.status_code == 409 and res.json()["detail"] == "Sesi yang dilewati tidak bisa diubah"
 
