@@ -11,13 +11,13 @@ from app.core.status import JADWAL_DILEWATI, JADWAL_SELESAI, JADWAL_TERJADWAL, T
 from app.db.base import Base
 from app.models import Agenda, Goal, JadwalTask, Milestone, Task, TaskDependency, TimeConstraint, User
 from app.services import jadwal_service
+from app.services.kalender_service import kegiatan_rutin_user
 from app.services.jadwal_service import (
     DEFAULT_DURASI_MENIT,
     agenda_user,
     awal_minggu,
     cek_bentrok,
     jam_aktif,
-    kegiatan_rutin,
     jadwalkan_goal,
     ke_session,
     muat_konteks,
@@ -102,7 +102,7 @@ def test_jam_aktif_from_config(monkeypatch):
 
 def test_kegiatan_rutin_only_own_with_labels(db, user_lengkap):
     user, _ = user_lengkap
-    rutin = kegiatan_rutin(db, user)
+    rutin = kegiatan_rutin_user(db, user)
     assert sorted((w.weekday, w.label) for w in rutin) == [(SEN, "Kuliah"), (RAB, "Gym")]
 
 

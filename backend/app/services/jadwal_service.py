@@ -23,7 +23,8 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.core.config import settings
 from app.core.status import JADWAL_DILEWATI, JADWAL_SELESAI, JADWAL_TERJADWAL, TASK_DONE
-from app.models import Agenda, Goal, JadwalTask, Milestone, Task, TaskDependency, TimeConstraint, User
+from app.models import Agenda, Goal, JadwalTask, Milestone, Task, TaskDependency, User
+from app.services.kalender_service import agenda_ke_busy_block, kegiatan_rutin_user
 from app.services.scheduler import (
     BusyBlock,
     Conflict,
@@ -57,14 +58,9 @@ def jam_aktif() -> list[WeeklyWindow]:
 # BACA DARI DATABASE
 # ============================================================
 
-def kegiatan_rutin(db: DbSession, user: User) -> list[WeeklyWindow]:
-    """Kegiatan rutin mingguan user (tabel time_constraint)."""
-    rows = db.scalars(select(TimeConstraint).where(TimeConstraint.id_user == user.id_user)).all()
-    return [WeeklyWindow(r.hari_dalam_minggu, r.waktu_mulai, r.waktu_selesai, label=r.nama) for r in rows]
-
-
 def agenda_user(db: DbSession, user: User, mulai: datetime, akhir: datetime) -> list[BusyBlock]:
-    """Agenda sekali-jalan user yang beririsan dengan [mulai, akhir)."""
+    """Agenda sekali-jalan user yang beririsan dengan [mulai, akhir).
+    Kegiatan rutin dibaca lewat `kalender_service.kegiatan_rutin_user`."""
     rows = db.scalars(
         select(Agenda).where(
             Agenda.id_user == user.id_user,
@@ -72,7 +68,7 @@ def agenda_user(db: DbSession, user: User, mulai: datetime, akhir: datetime) -> 
             Agenda.waktu_mulai < akhir,
         )
     ).all()
-    return [BusyBlock(Interval(r.waktu_mulai, r.waktu_selesai), "agenda", r.nama) for r in rows]
+    return [agenda_ke_busy_block(r) for r in rows]
 
 
 def sesi_user(db: DbSession, user: User, mulai: datetime, akhir: datetime) -> list[JadwalTask]:
@@ -120,7 +116,7 @@ class KonteksJadwal:
 
 
 def muat_konteks(db: DbSession, user: User, mulai: datetime, akhir: datetime) -> KonteksJadwal:
-    rutin = kegiatan_rutin(db, user)
+    rutin = kegiatan_rutin_user(db, user)
     agenda = agenda_user(db, user, mulai, akhir)
     return KonteksJadwal(
         mulai=mulai,
