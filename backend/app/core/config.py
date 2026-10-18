@@ -19,8 +19,7 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str | None = "https://generativelanguage.googleapis.com/v1beta/openai/"
     LLM_MODEL: str = "gemini-3.5-flash-lite"
 
-    # Jam aktif harian untuk penjadwal (keputusan D10): jam luang = jam aktif − kegiatan rutin − agenda.
-    # Sementara sama untuk semua user & semua hari; nilai final menunggu konfirmasi tim.
+    # Jam aktif harian (D10): waktu luang = jam aktif − kegiatan rutin − agenda. Bukan input user.
     JAM_AKTIF_MULAI: time = time(6, 0)
     JAM_AKTIF_SELESAI: time = time(22, 0)
 

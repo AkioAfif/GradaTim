@@ -6,6 +6,7 @@ from typing import Optional
 from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text, Time
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.status import TASK_TODO
 from app.db.base import Base
 
 
@@ -19,7 +20,7 @@ class Task(Base):
     deskripsi: Mapped[Optional[str]] = mapped_column(Text)
     deadline: Mapped[Optional[datetime]] = mapped_column(DateTime)
     durasi_estimasi: Mapped[Optional[int]] = mapped_column(Integer)  # menit
-    status: Mapped[str] = mapped_column(String(20), default="pending")
+    status: Mapped[str] = mapped_column(String(20), default=TASK_TODO)
     tingkat_effort: Mapped[Optional[str]] = mapped_column(String(10))  # low | medium | high
     tingkat_impact: Mapped[Optional[str]] = mapped_column(String(10))  # low | medium | high
 

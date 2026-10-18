@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.status import JADWAL_TERJADWAL
 from app.db.base import Base
 
 
@@ -17,6 +18,6 @@ class JadwalTask(Base):
     id_task: Mapped[int] = mapped_column(ForeignKey("task.id_task"), index=True)
     waktu_mulai: Mapped[datetime] = mapped_column(DateTime)
     waktu_selesai: Mapped[datetime] = mapped_column(DateTime)
-    status: Mapped[str] = mapped_column(String(20), default="terjadwal")
+    status: Mapped[str] = mapped_column(String(20), default=JADWAL_TERJADWAL)
 
     task: Mapped["Task"] = relationship(back_populates="jadwal")

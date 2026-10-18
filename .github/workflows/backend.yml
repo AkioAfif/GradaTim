@@ -1,0 +1,58 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+    paths: ["backend/**", ".github/workflows/backend.yml"]
+  pull_request:
+    branches: [main]
+    paths: ["backend/**", ".github/workflows/backend.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      JWT_SECRET_KEY: ci-dummy-secret-bukan-untuk-produksi
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gradatim
+          POSTGRES_PASSWORD: gradatim
+          POSTGRES_DB: gradatim
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gradatim -d gradatim"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Tes memakai SQLite in-memory sendiri (tests/conftest.py); LLM selalu di-mock, tanpa LLM_API_KEY.
+      - name: Tests (SQLite)
+        run: python -m pytest -q
+
+      - name: Migration round-trip + drift check (Postgres 16)
+        env:
+          DATABASE_URL: postgresql+psycopg://gradatim:gradatim@localhost:5432/gradatim
+        run: |
+          python -m alembic upgrade head
+          python -m alembic downgrade base
+          python -m alembic upgrade head
+          python -m alembic check

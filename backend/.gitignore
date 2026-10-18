@@ -6,3 +6,9 @@ __pycache__/
 venv/
 .venv/
 .pytest_cache/
+
+# database lokal / hasil tes & smoke test
+*.db
+*.sqlite3
+.coverage
+htmlcov/

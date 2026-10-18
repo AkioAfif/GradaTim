@@ -6,6 +6,7 @@ from typing import Optional
 from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text, Time
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.status import GOAL_ACTIVE
 from app.db.base import Base
 
 
@@ -17,7 +18,7 @@ class Goal(Base):
     judul_goal: Mapped[str] = mapped_column(String(255))
     deskripsi: Mapped[Optional[str]] = mapped_column(Text)
     deadline: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    status: Mapped[str] = mapped_column(String(20), default="active")
+    status: Mapped[str] = mapped_column(String(20), default=GOAL_ACTIVE)
 
     user: Mapped["User"] = relationship(back_populates="goals")
     milestones: Mapped[list["Milestone"]] = relationship(
