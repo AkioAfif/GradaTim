@@ -8,6 +8,7 @@ import pytest
 from openai import OpenAIError
 
 from ai_model.mood_predictor import MODEL_PATH
+from app.core import waktu
 from app.schemas.ai_decomposition import GoalDecomposition, GoalDecompositionRequest
 from app.schemas.mood import MoodAnswers
 from app.services import ai_service
@@ -114,6 +115,19 @@ def test_decompose_goal_deadline_today_is_one_day():
     })
     result = decompose_goal(_request(deadline=TODAY), today=TODAY, client=_fake_client(raw))
     assert result.milestones[0].tasks[0].day_number == 1
+
+
+def test_decompose_goal_default_today_pakai_tanggal_wib(monkeypatch):
+    raw = GoalDecomposition.model_validate({
+        "goal_title": "x", "estimated_total_days": 1,
+        "milestones": [{"milestone_title": "m", "order": 1, "tasks": [_task("t", 1)]}],
+    })
+    monkeypatch.setattr(waktu, "hari_ini", lambda: TODAY)
+    client = _fake_client(raw)
+    decompose_goal(_request(), client=client)
+
+    user_prompt = client.chat.completions.parse.call_args.kwargs["messages"][1]["content"]
+    assert f"Tanggal hari ini: {TODAY.isoformat()}" in user_prompt
 
 
 def test_decompose_goal_rejects_past_deadline():

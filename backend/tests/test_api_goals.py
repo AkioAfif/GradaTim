@@ -497,7 +497,9 @@ def test_hanya_goal_service_yang_membaca_field_output_ai():
                 "effort_level", "impact_level", "depends_on", "task_number"}
     app_dir = pathlib.Path(__file__).resolve().parents[1] / "app"
     # file AI milik Argya mendefinisikan/menormalisasi kontrak itu sendiri
-    dikecualikan = {"services/ai_service.py", "schemas/ai_decomposition.py", "services/scheduler.py"}
+    # jadwal_service membaca `Session.task_number` milik scheduler (= id_task), bukan output AI
+    dikecualikan = {"services/ai_service.py", "schemas/ai_decomposition.py", "services/scheduler.py",
+                    "services/jadwal_service.py"}
     pemakai = set()
     for path in app_dir.rglob("*.py"):
         rel = path.relative_to(app_dir).as_posix()

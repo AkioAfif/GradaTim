@@ -252,6 +252,12 @@ def test_schedule_unknown_dependency_treated_as_done():
     assert result.unscheduled == []
 
 
+def test_schedule_ready_tasks_keep_input_order():
+    # tidak ada dependensi: urutan masukan dipakai, bukan nomor task
+    result = schedule_tasks([T(9, 60), T(2, 60)], [iv(5, 19, 21)])
+    assert [s.task_number for s in result.sessions] == [9, 2]
+
+
 def test_schedule_cap_raised_when_days_are_uneven():
     # 1 hari punya 3 jam, 4 hari lain cuma 15 menit → rata-rata kecil, tapi task 120 menit tetap harus muat
     slots = [iv(5, 9, 12)] + [Interval(dt(d, 19), dt(d, 19, 15)) for d in range(6, 10)]

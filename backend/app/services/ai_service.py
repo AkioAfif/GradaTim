@@ -14,6 +14,7 @@ from openai import OpenAI, OpenAIError
 from pydantic import ValidationError
 
 from ai_model.mood_predictor import filter_tasks_by_capacity, predict_capacity
+from app.core import waktu
 from app.core.config import settings
 from app.schemas.ai_decomposition import GoalDecomposition, GoalDecompositionRequest
 from app.schemas.mood import MoodAnswers, MoodAssessment
@@ -119,13 +120,14 @@ def decompose_goal(
 
     Args:
         request: judul, deskripsi, deadline, dan (opsional) menit luang per hari
-        today: override tanggal hari ini (untuk testing)
+        today: override tanggal hari ini (untuk testing). Default: tanggal hari ini di WIB,
+            bukan tanggal server (di container Docker jam server = UTC)
         client: override LLM client (untuk testing)
 
     Raises:
         AIServiceError: deadline sudah lewat, API gagal, atau output AI tidak bisa dipakai
     """
-    today = today or date.today()
+    today = today or waktu.hari_ini()
     total_days = (request.deadline - today).days + 1  # inklusif: deadline hari ini = 1 hari
     if total_days < 1:
         raise AIServiceError("Deadline sudah lewat. Pilih tanggal hari ini atau setelahnya.")
