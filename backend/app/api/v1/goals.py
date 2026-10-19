@@ -31,10 +31,10 @@ def _detail(db: Session, goal: Goal) -> GoalDetail:
     milestones = db.scalars(
         select(Milestone)
         .where(Milestone.id_goal == goal.id_goal)
-        .order_by(Milestone.urutan, Milestone.id_milestone)
         .options(selectinload(Milestone.tasks).selectinload(Task.prasyarat))
     ).all()
-    return goal_ke_detail(goal, list(milestones))
+    # urutan pohon: Bulan 1, minggu-minggunya, Bulan 2, ... (milestone datar lama: menurut urutan)
+    return goal_ke_detail(goal, sorted(milestones, key=goal_service.urutan_milestone))
 
 
 def _tolak(kode: int, detail: str) -> HTTPException:
@@ -106,7 +106,8 @@ def decompose_goal(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> GoalDetail:
-    """Pecah goal dengan AI lalu simpan milestone & task-nya (FR-2).
+    """Susun rencana goal dengan AI lalu simpan (FR-2, D4, D11): milestone `bulanan` → `mingguan`
+    untuk seluruh durasi goal, dan task untuk minggu ini saja (minggu berikutnya dirinci belakangan).
 
     `?replace=true` mengganti hasil dekomposisi sebelumnya; tanpa itu, goal yang sudah punya
     milestone dijawab 409.
@@ -135,10 +136,10 @@ def decompose_goal(
         menit_harian=menit_harian,
     )
     try:
-        hasil = ai_service.decompose_goal(request, today=today)
+        rencana = ai_service.rencanakan_goal(request, today=today)
     except ai_service.AIServiceError as e:
         raise _tolak(status.HTTP_502_BAD_GATEWAY, f"Gagal memproses goal dengan AI: {e}") from e
 
-    goal_service.simpan_dekomposisi(db, goal, hasil, today)
+    goal_service.simpan_dekomposisi(db, goal, rencana)
     db.refresh(goal)
     return _detail(db, goal)

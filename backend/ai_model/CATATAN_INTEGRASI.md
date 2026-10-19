@@ -15,26 +15,33 @@ tampilan Effort vs Impact (FR-9). Task manual tanpa nilai dianggap `medium` oleh
 (`id_task`, `id_task_prasyarat`). `task.id_parent_task` tetap untuk hierarki **sub-task**, bukan prasyarat.
 Penjadwal membaca tabel ini lewat `jadwal_service.prasyarat_task()`.
 
-## 2. Pemetaan output AI → tabel
+## 2. Pemetaan rencana AI → tabel (D4, D11)
 
-Pemetaan hanya ada di **satu tempat**: `app/services/goal_service.simpan_dekomposisi()`
-(dipanggil `POST /api/v1/goals/{id_goal}/decompose`). Kalau bentuk output AI berubah, cukup fungsi itu yang diganti.
+`POST /api/v1/goals/{id_goal}/decompose` memanggil `ai_service.rencanakan_goal()`. Tanggal tidak berasal dari AI:
+kerangka minggu (Senin–Minggu, minggu ke-1 mulai hari ini) dan bulan kalender dihitung `app/services/rencana.py`,
+AI hanya mengisi judul/tujuan tiap target dan task **minggu ke-1**. Hasilnya (`RencanaGoal`) disimpan
+`goal_service.simpan_dekomposisi()`; field task output AI hanya dibaca di `goal_service.tambah_task_ai()`
+(dipakai juga nanti saat merinci minggu berikutnya).
 
-| Output AI (`GoalDecomposition`) | Kolom DB |
+| Rencana (`RencanaGoal`) | Kolom DB |
 | --- | --- |
-| `goal_title` | *(tidak dipakai — judul pakai input user `goal.judul_goal`)* |
-| `milestones[].milestone_title` | `milestone.judul_milestone` |
-| `milestones[].order` | `milestone.urutan` |
-| — | `milestone.tipe` = `NULL`, `milestone.id_parent_milestone` = `NULL` *(datar dulu, lihat poin 4)* |
-| — | `milestone.deadline` = deadline task terakhir di milestone tersebut |
-| `tasks[].task_title` | `task.nama_task` |
-| `tasks[].estimated_minutes` | `task.durasi_estimasi` |
-| `tasks[].day_number` | `task.deadline` = 23:59 pada hari ini + (`day_number` − 1) hari |
-| `tasks[].effort_level` / `impact_level` | `task.tingkat_effort` / `task.tingkat_impact` |
-| `tasks[].task_number` + `depends_on` | baris `task_dependency` (nomor tak dikenal, diri sendiri, dan duplikat dibuang) |
+| `goal_title` (output AI) | *(tidak dipakai — judul pakai input user `goal.judul_goal`)* |
+| `bulan[]` | `milestone` dengan `tipe = "bulanan"`, `id_parent_milestone = NULL` |
+| `bulan[].bulan_ke` / `judul` / `deskripsi` | `milestone.urutan` / `judul_milestone` / `deskripsi` (kosong → `NULL`) |
+| `bulan[].minggu[-1].akhir` | `milestone.deadline` (23:59) |
+| `bulan[].minggu[]` | `milestone` dengan `tipe = "mingguan"`, `id_parent_milestone` = milestone bulanannya |
+| `minggu[].minggu_ke` | `milestone.urutan` — nomor minggu sepanjang goal (1, 2, ...), bukan per bulan |
+| `minggu[].akhir` | `milestone.deadline` (23:59 hari Minggu, atau deadline goal untuk minggu terakhir) |
+| `task_minggu_ini[]` | `task` di bawah milestone mingguan ke-1, `task.deadline` = deadline milestone itu |
+| `task_title` / `estimated_minutes` | `task.nama_task` / `task.durasi_estimasi` |
+| `effort_level` / `impact_level` | `task.tingkat_effort` / `task.tingkat_impact` |
+| `task_number` + `depends_on` | baris `task_dependency` (nomor tak dikenal, diri sendiri, dan duplikat dibuang) |
 
-Waktu jadwal sebenarnya **bukan** dari `day_number`, tapi dari penjadwal (`POST /api/v1/jadwal/goal/{id_goal}`,
-FR-4) yang menyimpan sesi ke `jadwal_task`.
+`GET /api/v1/goals/{id_goal}` mengembalikan milestone datar dalam **urutan pohon** (Bulan 1, minggu-minggunya,
+Bulan 2, ...); frontend menyusun pohonnya dari `id_parent_milestone`.
+
+Waktu jadwal sebenarnya berasal dari penjadwal (`POST /api/v1/jadwal/goal/{id_goal}`, FR-4) yang menyimpan sesi
+ke `jadwal_task`.
 
 ## 3. Mood questionnaire
 
@@ -72,8 +79,8 @@ FR-4) yang menyimpan sesi ke `jadwal_task`.
 - `menit_harian` untuk AI decomposer dihitung otomatis oleh `goal_service.hitung_menit_harian()`
   (= `scheduler.average_daily_minutes(jam_aktif, kegiatan_rutin)`, keputusan D6/D10), atau bisa di-override
   lewat body request `/decompose`.
-- **Belum dikerjakan (D4/D11):** output AI bertingkat bulanan → mingguan → task, dipetakan ke
-  `milestone.tipe` + `milestone.id_parent_milestone`. Lihat `docs/KEPUTUSAN_DESAIN_PENJADWALAN.md`.
+- **Belum dikerjakan (D11):** merinci task minggu ke-2 dst. sesuai progres, dan penjadwal yang hanya mengambil
+  task dari minggu yang sudah tiba. Lihat `docs/KEPUTUSAN_DESAIN_PENJADWALAN.md`.
 - Tanggal "hari ini" untuk AI decomposer selalu tanggal WIB (`app.core.waktu.hari_ini()`), bukan tanggal server.
 - LLM default sekarang **Google Gemini** (free tier), via OpenAI-compatible API. Diatur lewat
   `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` di `.env` (menggantikan `OPENAI_API_KEY`).

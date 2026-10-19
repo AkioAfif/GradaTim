@@ -1,4 +1,4 @@
-"""Tes API goal: CRUD + dekomposisi AI (FR-1, FR-2). LLM selalu di-mock."""
+"""Tes API goal: CRUD + rencana AI bulanan → mingguan (FR-1, FR-2, D4, D11). LLM selalu di-mock."""
 
 import ast
 import pathlib
@@ -14,12 +14,13 @@ from app.models.milestone import Milestone
 from app.models.task import Task
 from app.models.task_dependency import TaskDependency
 from app.models.user import User
-from app.schemas.ai_decomposition import GoalDecomposition
+from app.schemas.ai_decomposition import PlannedTask, RencanaGoal, TargetBulan, TargetMinggu
 from app.services import ai_service, goal_service, scheduler
+from app.services.rencana import kerangka_rencana
 
 URL = "/api/v1/goals"
 URL_RUTIN = "/api/v1/time-constraints"
-HARI_INI = date(2026, 10, 5)
+HARI_INI = date(2026, 10, 5)  # Senin
 
 
 @pytest.fixture(autouse=True)
@@ -27,45 +28,46 @@ def _hari_ini(hari_ini_beku):
     assert hari_ini_beku == HARI_INI
 
 
-def _hasil_ai() -> GoalDecomposition:
-    """2 milestone, 5 task, dependensi campuran (termasuk duplikat, diri sendiri, dan nomor tak dikenal)."""
-    return GoalDecomposition.model_validate({
-        "goal_title": "Judul dari AI (tidak dipakai)",
-        "estimated_total_days": 6,
-        "milestones": [
-            {"milestone_title": "Persiapan", "order": 1, "tasks": [
-                {"task_number": 1, "depends_on": [], "task_title": "Install Docker", "day_number": 1,
-                 "estimated_minutes": 30, "effort_level": "low", "impact_level": "high"},
-                {"task_number": 2, "depends_on": [1], "task_title": "Baca dokumentasi", "day_number": 2,
-                 "estimated_minutes": 60, "effort_level": "medium", "impact_level": "medium"},
-                {"task_number": 3, "depends_on": [1, 1, 3, 99], "task_title": "Tulis Dockerfile", "day_number": 2,
-                 "estimated_minutes": 45, "effort_level": "high", "impact_level": "low"},
-            ]},
-            {"milestone_title": "Eksekusi", "order": 2, "tasks": [
-                {"task_number": 4, "depends_on": [2, 3], "task_title": "Deploy container", "day_number": 4,
-                 "estimated_minutes": 90, "effort_level": "high", "impact_level": "high"},
-                {"task_number": 5, "depends_on": [], "task_title": "Tulis catatan", "day_number": 6,
-                 "estimated_minutes": 20, "effort_level": "low", "impact_level": "low"},
-            ]},
+def _task(nomor, judul, menit=30, effort="low", impact="low", deps=()):
+    return PlannedTask(task_number=nomor, depends_on=list(deps), task_title=judul, estimated_minutes=menit,
+                       effort_level=effort, impact_level=impact)
+
+
+def _task_ai() -> list[PlannedTask]:
+    """5 task minggu ke-1, dependensi campuran (termasuk duplikat, diri sendiri, dan nomor tak dikenal)."""
+    return [
+        _task(1, "Install Docker", 30, "low", "high"),
+        _task(2, "Baca dokumentasi", 60, "medium", "medium", deps=[1]),
+        _task(3, "Tulis Dockerfile", 45, "high", "low", deps=[1, 1, 3, 99]),
+        _task(4, "Deploy container", 90, "high", "high", deps=[2, 3]),
+        _task(5, "Tulis catatan", 20),
+    ]
+
+
+def _task_ai_kecil() -> list[PlannedTask]:
+    return [_task(1, "Langkah A"), _task(2, "Langkah B", deps=[1])]
+
+
+def _rencana(today: date, deadline: date, tasks: list[PlannedTask], awalan: str = "") -> RencanaGoal:
+    """Rencana seperti hasil `ai_service.rencanakan_goal`: kerangka kalender asli + judul buatan."""
+    return RencanaGoal(
+        bulan=[
+            TargetBulan(
+                bulan_ke=b.bulan_ke, tahun=b.tahun, bulan=b.bulan, judul=f"{awalan}{b.nama}", deskripsi=f"Tujuan {b.nama}",
+                minggu=[TargetMinggu(minggu_ke=m.minggu_ke, mulai=m.mulai, akhir=m.akhir,
+                                     judul=f"{awalan}Minggu {m.minggu_ke}", deskripsi="")
+                        for m in b.minggu],
+            )
+            for b in kerangka_rencana(today, deadline)
         ],
-    })
-
-
-def _hasil_ai_kecil() -> GoalDecomposition:
-    return GoalDecomposition.model_validate({
-        "goal_title": "x", "estimated_total_days": 2,
-        "milestones": [{"milestone_title": "Ulang", "order": 1, "tasks": [
-            {"task_number": 1, "depends_on": [], "task_title": "Langkah A", "day_number": 1,
-             "estimated_minutes": 30, "effort_level": "low", "impact_level": "low"},
-            {"task_number": 2, "depends_on": [1], "task_title": "Langkah B", "day_number": 2,
-             "estimated_minutes": 30, "effort_level": "low", "impact_level": "low"},
-        ]}],
-    })
+        task_minggu_ini=tasks,
+    )
 
 
 class MockAI:
     def __init__(self):
-        self.hasil = _hasil_ai()
+        self.tasks = _task_ai()
+        self.awalan = ""
         self.error: Exception | None = None
         self.panggilan: list[tuple] = []  # (request, today)
 
@@ -73,13 +75,13 @@ class MockAI:
         self.panggilan.append((request, today))
         if self.error is not None:
             raise self.error
-        return self.hasil.model_copy(deep=True)
+        return _rencana(today, request.deadline, [t.model_copy(deep=True) for t in self.tasks], self.awalan)
 
 
 @pytest.fixture
 def ai(monkeypatch) -> MockAI:
     mock = MockAI()
-    monkeypatch.setattr(ai_service, "decompose_goal", mock)
+    monkeypatch.setattr(ai_service, "rencanakan_goal", mock)
     return mock
 
 
@@ -99,8 +101,12 @@ def _hitung(db, model) -> int:
     return db.scalar(select(func.count()).select_from(model))
 
 
-def _akhir(hari_ke: int) -> str:
-    return datetime.combine(HARI_INI + timedelta(days=hari_ke - 1), time(23, 59)).isoformat()
+def _akhir(d: date) -> str:
+    return datetime.combine(d, time(23, 59)).isoformat()
+
+
+# Goal default (5 → 31 Okt): 1 bulan (Oktober) + 4 minggu → 5 milestone
+MILESTONE_DEFAULT = 5
 
 
 # ---------- CRUD ----------
@@ -211,37 +217,48 @@ def test_id_tidak_ada_404(client, auth_headers):
     assert client.post(f"{URL}/999/decompose", headers=h).status_code == 404
 
 
-# ---------- dekomposisi ----------
+# ---------- rencana (dekomposisi) ----------
 
-def test_decompose_menyimpan_pohon_dengan_benar(client, auth_headers, ai):
+def test_decompose_menyimpan_pohon_bulanan_mingguan(client, auth_headers, ai):
     h = auth_headers()
-    goal = _buat(client, h)
+    goal = _buat(client, h, deadline="2026-11-10")  # Sen 5 Okt → Sel 10 Nov: Oktober (minggu 1–4), November (5–6)
 
     r = client.post(f"{URL}/{goal['id_goal']}/decompose", headers=h)
     assert r.status_code == 201, r.text
     body = r.json()
+    ms = body["milestones"]
 
-    assert body["judul_goal"] == "Belajar Docker"  # goal_title dari AI tidak dipakai
-    assert [m["judul_milestone"] for m in body["milestones"]] == ["Persiapan", "Eksekusi"]
-    assert [m["urutan"] for m in body["milestones"]] == [1, 2]
-    for m in body["milestones"]:
-        assert m["tipe"] is None
-        assert m["id_parent_milestone"] is None
-    assert body["milestones"][0]["deadline"] == _akhir(2)  # max deadline task di milestone
-    assert body["milestones"][1]["deadline"] == _akhir(6)
+    # urutan pohon: bulan, lalu minggu-minggunya
+    assert [(m["tipe"], m["judul_milestone"], m["urutan"]) for m in ms] == [
+        ("bulanan", "Oktober 2026", 1),
+        ("mingguan", "Minggu 1", 1), ("mingguan", "Minggu 2", 2), ("mingguan", "Minggu 3", 3),
+        ("mingguan", "Minggu 4", 4),
+        ("bulanan", "November 2026", 2),
+        ("mingguan", "Minggu 5", 5), ("mingguan", "Minggu 6", 6),
+    ]
+    oktober, november = ms[0], ms[5]
+    assert [m["id_parent_milestone"] for m in ms] == [None] + [oktober["id_milestone"]] * 4 + [None] + [
+        november["id_milestone"]] * 2
+    assert oktober["deskripsi"] == "Tujuan Oktober 2026" and ms[1]["deskripsi"] is None  # "" → NULL
+    # deadline: akhir minggu / akhir minggu terakhir bulan itu (26 Okt–1 Nov masuk Oktober)
+    assert [m["deadline"] for m in ms] == [
+        _akhir(date(2026, 11, 1)), _akhir(date(2026, 10, 11)), _akhir(date(2026, 10, 18)), _akhir(date(2026, 10, 25)),
+        _akhir(date(2026, 11, 1)), _akhir(date(2026, 11, 10)), _akhir(date(2026, 11, 8)), _akhir(date(2026, 11, 10)),
+    ]
 
-    tasks = [t for m in body["milestones"] for t in m["tasks"]]
-    per_nama = {t["nama_task"]: t for t in tasks}
-    assert len(tasks) == 5
+    # task hanya di minggu ke-1, deadline = akhir minggu ke-1
+    assert [len(m["tasks"]) for m in ms] == [0, 5, 0, 0, 0, 0, 0, 0]
+    tasks = ms[1]["tasks"]
     assert all(t["status"] == "todo" for t in tasks)
     assert [(t["nama_task"], t["deadline"], t["durasi_estimasi"], t["tingkat_effort"], t["tingkat_impact"])
             for t in tasks] == [
-        ("Install Docker", _akhir(1), 30, "low", "high"),
-        ("Baca dokumentasi", _akhir(2), 60, "medium", "medium"),
-        ("Tulis Dockerfile", _akhir(2), 45, "high", "low"),
-        ("Deploy container", _akhir(4), 90, "high", "high"),
-        ("Tulis catatan", _akhir(6), 20, "low", "low"),
+        ("Install Docker", _akhir(date(2026, 10, 11)), 30, "low", "high"),
+        ("Baca dokumentasi", _akhir(date(2026, 10, 11)), 60, "medium", "medium"),
+        ("Tulis Dockerfile", _akhir(date(2026, 10, 11)), 45, "high", "low"),
+        ("Deploy container", _akhir(date(2026, 10, 11)), 90, "high", "high"),
+        ("Tulis catatan", _akhir(date(2026, 10, 11)), 20, "low", "low"),
     ]
+    per_nama = {t["nama_task"]: t for t in tasks}
     id_ = {nama: t["id_task"] for nama, t in per_nama.items()}
     assert per_nama["Install Docker"]["prasyarat"] == []
     assert per_nama["Baca dokumentasi"]["prasyarat"] == [id_["Install Docker"]]
@@ -250,6 +267,7 @@ def test_decompose_menyimpan_pohon_dengan_benar(client, auth_headers, ai):
     assert per_nama["Deploy container"]["prasyarat"] == sorted([id_["Baca dokumentasi"], id_["Tulis Dockerfile"]])
     assert per_nama["Tulis catatan"]["prasyarat"] == []
 
+    assert body["judul_goal"] == "Belajar Docker"  # goal_title dari AI tidak dipakai
     # GET detail mengembalikan pohon yang sama
     assert client.get(f"{URL}/{goal['id_goal']}", headers=h).json() == body
 
@@ -258,7 +276,7 @@ def test_decompose_menyimpan_pohon_dengan_benar(client, auth_headers, ai):
     assert today == HARI_INI
     assert request.judul_goal == "Belajar Docker"
     assert request.deskripsi == "Sampai bisa deploy"
-    assert request.deadline == date(2026, 10, 31)
+    assert request.deadline == date(2026, 11, 10)
 
 
 def test_menit_harian_tanpa_rutin_dipotong_720(client, auth_headers, ai):
@@ -329,24 +347,29 @@ def test_decompose_kedua_409_lalu_replace_mengganti_pohon(client, auth_headers, 
     assert r.json()["detail"] == "Goal sudah didekomposisi"
     assert len(ai.panggilan) == 1  # AI tidak dipanggil untuk request yang ditolak
 
-    ai.hasil = _hasil_ai_kecil()
+    ai.tasks, ai.awalan = _task_ai_kecil(), "Ulang "
     r = client.post(path, params={"replace": "true"}, headers=h)
     assert r.status_code == 201, r.text
     baru = r.json()
-    assert [m["judul_milestone"] for m in baru["milestones"]] == ["Ulang"]
-    tasks_baru = baru["milestones"][0]["tasks"]
+    assert [m["judul_milestone"] for m in baru["milestones"]] == [
+        "Ulang Oktober 2026", "Ulang Minggu 1", "Ulang Minggu 2", "Ulang Minggu 3", "Ulang Minggu 4"
+    ]
+    tasks_baru = baru["milestones"][1]["tasks"]
     assert [t["nama_task"] for t in tasks_baru] == ["Langkah A", "Langkah B"]
     assert tasks_baru[1]["prasyarat"] == [tasks_baru[0]["id_task"]]
 
     # pohon lama hilang total, tidak ada baris yatim
-    assert _hitung(db, Milestone) == 1
+    assert _hitung(db, Milestone) == MILESTONE_DEFAULT
     assert _hitung(db, Task) == 2
     assert _hitung(db, TaskDependency) == 1
     # (id tidak bisa dibandingkan: SQLite memakai ulang rowid yang sudah dihapus)
     assert not nama_lama & set(db.scalars(select(Task.nama_task)))
+    assert not {"Oktober 2026", "Minggu 1"} & set(db.scalars(select(Milestone.judul_milestone)))
     id_ada = set(db.scalars(select(Task.id_task)))
     for dep in db.scalars(select(TaskDependency)):
         assert {dep.id_task, dep.id_task_prasyarat} <= id_ada
+    id_milestone = set(db.scalars(select(Milestone.id_milestone)))
+    assert set(db.scalars(select(Milestone.id_parent_milestone).where(Milestone.id_parent_milestone.is_not(None)))) <= id_milestone
 
 
 def test_replace_juga_menghapus_jadwal_task_lama(client, auth_headers, ai, db):
@@ -358,7 +381,7 @@ def test_replace_juga_menghapus_jadwal_task_lama(client, auth_headers, ai, db):
     db.add(JadwalTask(id_task=id_task, waktu_mulai=datetime(2026, 10, 5, 9), waktu_selesai=datetime(2026, 10, 5, 10)))
     db.commit()
 
-    ai.hasil = _hasil_ai_kecil()
+    ai.tasks = _task_ai_kecil()
     assert client.post(path, params={"replace": "true"}, headers=h).status_code == 201
     assert _hitung(db, JadwalTask) == 0
 
@@ -384,7 +407,7 @@ def test_ai_error_saat_replace_pohon_lama_tetap_utuh(client, auth_headers, ai, d
     client.post(path, headers=h)
     ai.error = ai_service.AIServiceError("gagal")
     assert client.post(path, params={"replace": "true"}, headers=h).status_code == 502
-    assert _hitung(db, Milestone) == 2
+    assert _hitung(db, Milestone) == MILESTONE_DEFAULT
     assert _hitung(db, Task) == 5
     assert _hitung(db, TaskDependency) == 4
 
@@ -420,13 +443,13 @@ def test_hapus_goal_cascade_milestone_task_dependensi_jadwal(client, auth_header
     id_task = db.scalar(select(Task.id_task).join(Milestone).where(Milestone.id_goal == goal["id_goal"]).limit(1))
     db.add(JadwalTask(id_task=id_task, waktu_mulai=datetime(2026, 10, 5, 9), waktu_selesai=datetime(2026, 10, 5, 10)))
     db.commit()
-    assert (_hitung(db, Milestone), _hitung(db, Task), _hitung(db, TaskDependency)) == (4, 10, 8)
+    assert (_hitung(db, Milestone), _hitung(db, Task), _hitung(db, TaskDependency)) == (2 * MILESTONE_DEFAULT, 10, 8)
 
     assert client.delete(f"{URL}/{goal['id_goal']}", headers=h).status_code == 204
     db.expire_all()
     assert db.get(Goal, goal["id_goal"]) is None
     # hanya pohon goal lain yang tersisa
-    assert (_hitung(db, Milestone), _hitung(db, Task), _hitung(db, TaskDependency)) == (2, 5, 4)
+    assert (_hitung(db, Milestone), _hitung(db, Task), _hitung(db, TaskDependency)) == (MILESTONE_DEFAULT, 5, 4)
     assert _hitung(db, JadwalTask) == 0
 
 
@@ -441,23 +464,31 @@ def test_hapus_user_cascade_goal(client, auth_headers, ai, db):
 
 # ---------- simpan_dekomposisi tanpa HTTP ----------
 
-def test_simpan_dekomposisi_unit(db):
-    user = User(nama="Unit", email="unit@contoh.com", password="x")
-    goal = Goal(user=user, judul_goal="Goal unit", deadline=datetime(2026, 10, 31, 23, 59))
+def _goal_unit(db, email):
+    goal = Goal(user=User(nama="Unit", email=email, password="x"), judul_goal="Goal unit",
+                deadline=datetime(2026, 1, 20, 23, 59))
     db.add(goal)
     db.commit()
+    return goal
 
-    today = date(2026, 1, 10)
-    goal_service.simpan_dekomposisi(db, goal, _hasil_ai(), today)
 
-    milestones = db.scalars(select(Milestone).order_by(Milestone.urutan)).all()
-    assert [(m.judul_milestone, m.urutan, m.tipe, m.id_parent_milestone, m.deadline) for m in milestones] == [
-        ("Persiapan", 1, None, None, datetime(2026, 1, 11, 23, 59)),
-        ("Eksekusi", 2, None, None, datetime(2026, 1, 15, 23, 59)),
+def test_simpan_dekomposisi_unit(db):
+    goal = _goal_unit(db, "unit@contoh.com")
+    today = date(2026, 1, 10)  # Sabtu: minggu ke-1 hanya Sabtu–Minggu
+    goal_service.simpan_dekomposisi(db, goal, _rencana(today, date(2026, 1, 20), _task_ai()))
+
+    milestones = sorted(db.scalars(select(Milestone)), key=goal_service.urutan_milestone)
+    januari = milestones[0]
+    assert [(m.judul_milestone, m.urutan, m.tipe, m.parent_milestone, m.deadline) for m in milestones] == [
+        ("Januari 2026", 1, "bulanan", None, datetime(2026, 1, 20, 23, 59)),
+        ("Minggu 1", 1, "mingguan", januari, datetime(2026, 1, 11, 23, 59)),
+        ("Minggu 2", 2, "mingguan", januari, datetime(2026, 1, 18, 23, 59)),
+        ("Minggu 3", 3, "mingguan", januari, datetime(2026, 1, 20, 23, 59)),
     ]
+    assert all(m.id_goal == goal.id_goal for m in milestones)
     tasks = {t.nama_task: t for t in db.scalars(select(Task))}
-    assert tasks["Install Docker"].deadline == datetime(2026, 1, 10, 23, 59)
-    assert tasks["Tulis catatan"].deadline == datetime(2026, 1, 15, 23, 59)
+    assert {t.milestone.judul_milestone for t in tasks.values()} == {"Minggu 1"}
+    assert {t.deadline for t in tasks.values()} == {datetime(2026, 1, 11, 23, 59)}
     assert {t.status for t in tasks.values()} == {"todo"}
     pasangan = {(d.id_task, d.id_task_prasyarat) for d in db.scalars(select(TaskDependency))}
     i = {nama: t.id_task for nama, t in tasks.items()}
@@ -470,31 +501,29 @@ def test_simpan_dekomposisi_unit(db):
     assert db.get(Goal, goal.id_goal).judul_goal == "Goal unit"
 
     # dipanggil lagi = mengganti, bukan menambah
-    goal_service.simpan_dekomposisi(db, goal, _hasil_ai_kecil(), today)
-    assert (_hitung(db, Milestone), _hitung(db, Task), _hitung(db, TaskDependency)) == (1, 2, 1)
+    goal_service.simpan_dekomposisi(db, goal, _rencana(today, date(2026, 1, 20), _task_ai_kecil()))
+    assert (_hitung(db, Milestone), _hitung(db, Task), _hitung(db, TaskDependency)) == (4, 2, 1)
 
 
 def test_simpan_dekomposisi_rollback_jika_gagal(db, monkeypatch):
-    user = User(nama="Unit", email="unit2@contoh.com", password="x")
-    goal = Goal(user=user, judul_goal="Goal unit", deadline=datetime(2026, 10, 31, 23, 59))
-    db.add(goal)
-    db.commit()
-    goal_service.simpan_dekomposisi(db, goal, _hasil_ai_kecil(), HARI_INI)
+    goal = _goal_unit(db, "unit2@contoh.com")
+    goal_service.simpan_dekomposisi(db, goal, _rencana(HARI_INI, date(2026, 10, 20), _task_ai_kecil()))
+    sebelum = (_hitung(db, Milestone), _hitung(db, Task), _hitung(db, TaskDependency))
 
     def _gagal(d):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(goal_service.waktu, "akhir_hari", _gagal)
     with pytest.raises(RuntimeError):
-        goal_service.simpan_dekomposisi(db, goal, _hasil_ai(), HARI_INI)
+        goal_service.simpan_dekomposisi(db, goal, _rencana(HARI_INI, date(2026, 11, 20), _task_ai()))
     # pohon lama tidak terhapus karena transaksi di-rollback
-    assert (_hitung(db, Milestone), _hitung(db, Task), _hitung(db, TaskDependency)) == (1, 2, 1)
+    assert (_hitung(db, Milestone), _hitung(db, Task), _hitung(db, TaskDependency)) == sebelum == (4, 2, 1)  # Oktober + 3 minggu
 
 
 def test_hanya_goal_service_yang_membaca_field_output_ai():
-    """D11: field output AI hanya boleh dibaca di goal_service.simpan_dekomposisi."""
-    field_ai = {"milestone_title", "task_title", "day_number", "estimated_minutes",
-                "effort_level", "impact_level", "depends_on", "task_number"}
+    """D11: field task output AI hanya boleh dibaca di goal_service.tambah_task_ai."""
+    field_ai = {"task_title", "estimated_minutes", "effort_level", "impact_level", "depends_on", "task_number",
+                "milestone_title", "day_number"}  # dua terakhir: kontrak lama, tidak boleh muncul lagi
     app_dir = pathlib.Path(__file__).resolve().parents[1] / "app"
     # file AI milik Argya mendefinisikan/menormalisasi kontrak itu sendiri
     # jadwal_service membaca `Session.task_number` milik scheduler (= id_task), bukan output AI
@@ -516,4 +545,4 @@ def test_hanya_goal_service_yang_membaca_field_output_ai():
         if isinstance(node, ast.FunctionDef)
         and any(isinstance(n, ast.Attribute) and n.attr in field_ai for n in ast.walk(node))
     }
-    assert fungsi == {"simpan_dekomposisi"}
+    assert fungsi == {"tambah_task_ai"}
