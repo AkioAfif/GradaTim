@@ -9,10 +9,17 @@ from openai import OpenAIError
 
 from ai_model.mood_predictor import MODEL_PATH
 from app.core import waktu
-from app.schemas.ai_decomposition import GoalDecompositionRequest, GoalPlan
+from app.schemas.ai_decomposition import (
+    GoalDecompositionRequest,
+    GoalPlan,
+    ProgresTask,
+    RincianMingguRequest,
+    TargetMinggu,
+    WeekTasks,
+)
 from app.schemas.mood import MoodAnswers
 from app.services import ai_service
-from app.services.ai_service import AIServiceError, assess_mood, recommend_tasks, rencanakan_goal
+from app.services.ai_service import AIServiceError, assess_mood, recommend_tasks, rencanakan_goal, rinci_minggu
 
 
 def _fake_client(parsed):
@@ -162,6 +169,107 @@ def test_rencanakan_goal_tanpa_api_key(monkeypatch):
     monkeypatch.setattr(ai_service.settings, "LLM_API_KEY", None)
     with pytest.raises(AIServiceError, match="LLM_API_KEY"):
         rencanakan_goal(_rencana_request(), today=RABU)
+
+# ------------------------------------------------------------
+# RINCIAN TASK PER MINGGU (D11)
+# ------------------------------------------------------------
+
+MINGGU_2 = TargetMinggu(minggu_ke=2, mulai=date(2026, 10, 26), akhir=date(2026, 11, 1),
+                        judul="Kuasai docker compose", deskripsi="Bisa menjalankan app + database")
+MINGGU_3 = TargetMinggu(minggu_ke=3, mulai=date(2026, 11, 2), akhir=date(2026, 11, 8),
+                        judul="Deploy ke server", deskripsi="")
+
+
+def _rincian(**kwargs):
+    data = {"judul_goal": "Belajar Docker", "deadline_goal": date(2026, 11, 10), "target": MINGGU_2,
+            "target_berikutnya": MINGGU_3, **kwargs}
+    return RincianMingguRequest(**data)
+
+
+def _week(tasks):
+    return WeekTasks.model_validate({"tasks": tasks})
+
+
+def test_rinci_minggu_prompt_berisi_target_progres_dan_konteks():
+    client = _fake_client(_week([_ptask("Tulis compose.yml", 1)]))
+    progres = [ProgresTask(minggu_ke=1, judul="Install Docker", menit=30, selesai=True),
+               ProgresTask(minggu_ke=1, judul="Buat Dockerfile", menit=60, selesai=False)]
+
+    hasil = rinci_minggu(_rincian(progres=progres), today=date(2026, 10, 24), client=client)  # Sabtu sebelumnya
+
+    assert [t.task_title for t in hasil] == ["Tulis compose.yml"]
+    prompt = _prompt(client)
+    assert "Target minggu ke-2 (26 Okt 2026 – 1 Nov 2026): Kuasai docker compose" in prompt
+    assert "Hasil yang ingin dicapai: Bisa menjalankan app + database" in prompt
+    assert "Sisa waktu minggu ini: 7 hari" in prompt  # minggu depan dirinci lebih awal: seminggu penuh
+    assert "Target minggu berikutnya (JANGAN dikerjakan sekarang): Deploy ke server" in prompt
+    assert "- [x] Minggu 1: Install Docker (30 menit)" in prompt
+    assert "- [ ] Minggu 1: Buat Dockerfile (60 menit)" in prompt
+    assert "Selesai 1 dari 2 task." in prompt
+    assert "menit per hari" not in prompt
+    kwargs = client.chat.completions.parse.call_args.kwargs
+    assert kwargs["response_format"] is WeekTasks
+    assert kwargs["messages"][0]["content"] == ai_service.WEEK_SYSTEM_PROMPT
+
+
+def test_rinci_minggu_minggu_berjalan_hanya_sisa_hari_dan_batas_menit_dikurangi_task_lama():
+    client = _fake_client(_week([_ptask("A", 1)]))
+    progres = [ProgresTask(minggu_ke=1, judul="Buat Dockerfile", menit=60, selesai=False),
+               ProgresTask(minggu_ke=1, judul="Tanpa estimasi", selesai=False)]
+
+    rinci_minggu(_rincian(progres=progres, menit_harian=60), today=date(2026, 10, 29), client=client)  # Kamis
+
+    prompt = _prompt(client)
+    assert "Sisa waktu minggu ini: 4 hari (29 Okt 2026 – 1 Nov 2026)" in prompt
+    assert "tidak boleh melebihi 180 menit" in prompt  # 60 × 4 hari − 60 menit task lama
+
+
+def test_rinci_minggu_tanpa_progres_dan_tanpa_task_lama():
+    client = _fake_client(_week([_ptask("A", 1)]))
+    rinci_minggu(_rincian(menit_harian=30), today=date(2026, 10, 26), client=client)
+    prompt = _prompt(client)
+    assert "(belum ada task sebelumnya)" in prompt
+    assert "tidak boleh melebihi 210 menit" in prompt
+
+
+def test_rinci_minggu_waktu_habis_oleh_task_lama():
+    client = _fake_client(_week([_ptask("A", 1)]))
+    progres = [ProgresTask(minggu_ke=1, judul="Besar", menit=240, selesai=False)]
+    rinci_minggu(_rincian(progres=progres, menit_harian=60), today=date(2026, 10, 30), client=client)  # 3 hari
+    assert "buat 1 task ringan saja" in _prompt(client)
+
+
+def test_rinci_minggu_normalisasi_task():
+    tasks = [_ptask("B", 5, minutes=500, deps=[3, 5]), _ptask("A", 3, minutes=1, deps=[5])]
+    hasil = rinci_minggu(_rincian(), today=date(2026, 10, 26), client=_fake_client(_week(tasks)))
+    assert [(t.task_number, t.task_title, t.depends_on, t.estimated_minutes) for t in hasil] == [
+        (1, "A", [], ai_service.MIN_TASK_MINUTES), (2, "B", [1], ai_service.MAX_TASK_MINUTES)
+    ]
+
+
+def test_rinci_minggu_tanpa_task_error():
+    with pytest.raises(AIServiceError, match="tidak menghasilkan task"):
+        rinci_minggu(_rincian(), today=date(2026, 10, 26), client=_fake_client(_week([])))
+
+
+def test_rinci_minggu_minggu_lewat_tanpa_memanggil_ai():
+    client = _fake_client(None)
+    with pytest.raises(AIServiceError, match="sudah lewat"):
+        rinci_minggu(_rincian(), today=date(2026, 11, 2), client=client)
+    client.chat.completions.parse.assert_not_called()
+
+
+def test_rinci_minggu_default_today_dan_error_api(monkeypatch):
+    monkeypatch.setattr(waktu, "hari_ini", lambda: date(2026, 10, 31))
+    client = _fake_client(_week([_ptask("A", 1)]))
+    rinci_minggu(_rincian(), client=client)
+    assert "Sisa waktu minggu ini: 2 hari" in _prompt(client)
+
+    client = MagicMock()
+    client.chat.completions.parse.side_effect = OpenAIError("boom")
+    with pytest.raises(AIServiceError, match="tidak tersedia"):
+        rinci_minggu(_rincian(), today=date(2026, 10, 26), client=client)
+
 
 # ------------------------------------------------------------
 # MOOD CAPACITY

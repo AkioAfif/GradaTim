@@ -54,6 +54,7 @@ def _blokir_llm(monkeypatch):
         raise AssertionError("LLM tidak boleh dipanggil di tes")
 
     monkeypatch.setattr(ai_service, "rencanakan_goal", _dilarang)
+    monkeypatch.setattr(ai_service, "rinci_minggu", _dilarang)
 
 
 @pytest.fixture

@@ -1,9 +1,10 @@
 """LLM integration & prompting logic
 
 Dua fitur AI GradaTim:
-    1. Goal Decomposition (FR-2) — memecah goal jadi milestone & task harian via LLM
-       (default Gemini, lewat OpenAI-compatible API + structured output JSON schema),
-       lalu dinormalisasi supaya aman dipakai scheduler.
+    1. Rencana goal (FR-2, D4, D11) — memecah goal jadi target bulanan → mingguan + task minggu ke-1,
+       lalu merinci task minggu-minggu berikutnya sesuai progres, via LLM (default Gemini, lewat
+       OpenAI-compatible API + structured output JSON schema). Hasilnya dinormalisasi supaya aman
+       dipakai scheduler.
     2. Mood Capacity (FR-6 & FR-7) — wrapper untuk model RandomForest di ai_model/.
 """
 
@@ -22,8 +23,10 @@ from app.schemas.ai_decomposition import (
     PlannedTarget,
     PlannedTask,
     RencanaGoal,
+    RincianMingguRequest,
     TargetBulan,
     TargetMinggu,
+    WeekTasks,
 )
 from app.schemas.mood import MoodAnswers, MoodAssessment
 from app.services.rencana import NAMA_BULAN, BulanRencana, kerangka_rencana
@@ -75,6 +78,17 @@ def _panggil_llm(client: OpenAI, system_prompt: str, user_prompt: str, response_
 # RENCANA BULANAN → MINGGUAN (D4, D11)
 # ============================================================
 
+# Aturan task yang sama untuk rencana awal (minggu ke-1) dan rincian minggu berikutnya
+_ATURAN_TASK = """- Tulis dalam Bahasa Indonesia, singkat, diawali kata kerja (contoh: "Install Docker Desktop & verifikasi CLI").
+- Setiap task harus bisa langsung dikerjakan tanpa dipecah lagi, dan hasilnya jelas terlihat.
+- estimated_minutes realistis, antara 10 dan 240 menit per task.
+- effort_level: seberapa berat usaha/energi mental task tersebut (low/medium/high).
+- impact_level: seberapa besar kontribusi task terhadap tercapainya goal (low/medium/high).
+- task_number: nomor unik 1, 2, 3, ... sesuai urutan pengerjaan.
+- depends_on: task_number yang WAJIB selesai sebelum task ini bisa dikerjakan (hanya boleh menunjuk
+  task dengan nomor lebih kecil). Kosongkan ([]) jika tidak ada prasyarat.
+- Jangan membuat pengguna kewalahan: lebih baik task kecil yang konsisten daripada task besar yang menakutkan."""
+
 PLAN_SYSTEM_PROMPT = """Kamu adalah perencana target pribadi untuk aplikasi GradaTim.
 Tugasmu menyusun rencana bertahap untuk satu goal besar: target bulanan → target mingguan,
 lalu merinci task konkret HANYA untuk minggu ke-1. Task minggu-minggu berikutnya dirinci nanti
@@ -89,17 +103,9 @@ Aturan kerangka:
 - title singkat dan spesifik (contoh: "Kuasai tenses dasar"); description = hasil yang ingin dicapai, 1 kalimat.
 
 Aturan task minggu ke-1:
-- Tulis dalam Bahasa Indonesia, singkat, diawali kata kerja (contoh: "Install Docker Desktop & verifikasi CLI").
-- Setiap task harus bisa langsung dikerjakan tanpa dipecah lagi, dan hasilnya jelas terlihat.
 - Task harus mewujudkan target minggu ke-1, dan muat di jumlah hari minggu ke-1.
 - Buat 2-10 task, urut sesuai urutan pengerjaan.
-- estimated_minutes realistis, antara 10 dan 240 menit per task.
-- effort_level: seberapa berat usaha/energi mental task tersebut (low/medium/high).
-- impact_level: seberapa besar kontribusi task terhadap tercapainya goal (low/medium/high).
-- task_number: nomor unik 1, 2, 3, ... sesuai urutan pengerjaan.
-- depends_on: task_number yang WAJIB selesai sebelum task ini bisa dikerjakan (hanya boleh menunjuk
-  task dengan nomor lebih kecil). Kosongkan ([]) jika tidak ada prasyarat.
-- Jangan membuat pengguna kewalahan: lebih baik task kecil yang konsisten daripada task besar yang menakutkan."""
+""" + _ATURAN_TASK
 
 
 def _tanggal(d: date) -> str:
@@ -210,6 +216,103 @@ def rencanakan_goal(
         client or _get_client(), PLAN_SYSTEM_PROMPT, _build_plan_prompt(request, today, kerangka), GoalPlan
     )
     return _normalize_plan(result, kerangka)
+
+
+# ============================================================
+# RINCIAN TASK PER MINGGU (D11)
+# ============================================================
+
+WEEK_SYSTEM_PROMPT = """Kamu adalah perencana target pribadi untuk aplikasi GradaTim.
+Pengguna sedang mengejar satu goal besar yang sudah dipecah menjadi target mingguan. Tugasmu merinci
+task konkret untuk SATU minggu saja, berdasarkan target minggu itu dan progres pengguna sejauh ini.
+
+Aturan minggu ini:
+- Task harus mewujudkan target minggu ini, dan muat di sisa hari minggu ini.
+- Lanjutkan dari task yang sudah selesai; jangan mengulang task yang sudah selesai.
+- Task lama yang belum selesai tetap ada di jadwal pengguna, jadi jangan buat ulang task yang sama.
+  Bila banyak yang tertinggal, buat task minggu ini lebih sedikit dan lebih ringan.
+- Jangan mengerjakan target minggu berikutnya lebih dulu.
+- Buat 1-10 task, urut sesuai urutan pengerjaan.
+""" + _ATURAN_TASK
+
+MENIT_MINIMAL_MINGGU = 30  # di bawah ini, waktu minggu ini dianggap sudah penuh oleh task lama
+
+
+def _build_week_prompt(request: RincianMingguRequest, mulai: date) -> str:
+    t = request.target
+    hari = (t.akhir - mulai).days + 1
+    lines = [
+        f"Goal: {request.judul_goal}",
+        f"Deskripsi: {request.deskripsi_goal or '-'}",
+        f"Deadline goal: {request.deadline_goal.isoformat()}",
+        "",
+        f"Target minggu ke-{t.minggu_ke} ({_tanggal(t.mulai)} – {_tanggal(t.akhir)}): {t.judul}",
+        f"Hasil yang ingin dicapai: {t.deskripsi or '-'}",
+        f"Sisa waktu minggu ini: {hari} hari ({_tanggal(mulai)} – {_tanggal(t.akhir)}).",
+    ]
+    if request.target_berikutnya:
+        lines.append(f"Target minggu berikutnya (JANGAN dikerjakan sekarang): {request.target_berikutnya.judul}")
+
+    lines += ["", "Progres task minggu-minggu sebelumnya ([x] = selesai, [ ] = belum):"]
+    if request.progres:
+        for p in request.progres:
+            menit = f" ({p.menit} menit)" if p.menit else ""
+            lines.append(f"- [{'x' if p.selesai else ' '}] Minggu {p.minggu_ke}: {p.judul}{menit}")
+        selesai = sum(p.selesai for p in request.progres)
+        lines.append(f"Selesai {selesai} dari {len(request.progres)} task.")
+    else:
+        lines.append("- (belum ada task sebelumnya)")
+
+    if request.menit_harian:
+        batas = request.menit_harian * hari
+        tertunda = sum(p.menit or 0 for p in request.progres if not p.selesai)
+        sisa = batas - tertunda
+        lines.append("")
+        if sisa < MENIT_MINIMAL_MINGGU:
+            lines.append(f"Waktu luang minggu ini ({batas} menit) sudah hampir habis oleh task lama yang belum selesai "
+                         f"({tertunda} menit): buat 1 task ringan saja, maksimal {MENIT_MINIMAL_MINGGU} menit.")
+        elif tertunda:
+            lines.append(f"Waktu luang pengguna: maksimal {request.menit_harian} menit per hari ({batas} menit untuk "
+                         f"{hari} hari), {tertunda} menit di antaranya masih untuk task lama yang belum selesai, jadi "
+                         f"total estimated_minutes task baru tidak boleh melebihi {sisa} menit.")
+        else:
+            lines.append(f"Waktu luang pengguna: maksimal {request.menit_harian} menit per hari, jadi total "
+                         f"estimated_minutes task tidak boleh melebihi {batas} menit.")
+    return "\n".join(lines)
+
+
+def rinci_minggu(
+    request: RincianMingguRequest,
+    today: Optional[date] = None,
+    client: Optional[OpenAI] = None,
+) -> list[PlannedTask]:
+    """
+    Rinci task konkret untuk satu target mingguan, berdasarkan progres minggu-minggu sebelumnya (D11).
+
+    Bila minggunya sedang berjalan, hanya sisa hari mulai `today` yang dihitung; bila minggu depan
+    (dirinci lebih awal), seluruh minggu dihitung.
+
+    Args:
+        request: goal, target minggu yang dirinci (+ target berikutnya), progres, menit luang per hari
+        today: override tanggal hari ini (untuk testing). Default: tanggal hari ini di WIB
+        client: override LLM client (untuk testing)
+
+    Returns:
+        Task urut pengerjaan, task_number 1..N, depends_on hanya ke task di daftar ini.
+
+    Raises:
+        AIServiceError: minggunya sudah lewat, API gagal, atau AI tidak menghasilkan task
+    """
+    today = today or waktu.hari_ini()
+    if today > request.target.akhir:
+        raise AIServiceError("Minggu ini sudah lewat, tidak bisa dirinci lagi.")
+    mulai = max(today, request.target.mulai)
+    result = _panggil_llm(
+        client or _get_client(), WEEK_SYSTEM_PROMPT, _build_week_prompt(request, mulai), WeekTasks
+    )
+    if not result.tasks:
+        raise AIServiceError("AI tidak menghasilkan task apa pun. Coba lagi.")
+    return _normalize_planned_tasks(result.tasks)
 
 
 # ============================================================
