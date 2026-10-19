@@ -1,11 +1,11 @@
 """Test endpoint /api/v1/mood (kuesioner mood harian, FR-6 & FR-7). Model mood asli, tanpa LLM."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
 from app.core import waktu
-from app.models import MoodQuestionnaire, QuestionnaireAnswer
+from app.models import Goal, JadwalTask, Milestone, MoodQuestionnaire, QuestionnaireAnswer, Task, User
 from app.schemas.mood import MoodAnswers
 from app.services import ai_service
 
@@ -112,3 +112,33 @@ def test_model_mood_tidak_tersedia_503_tanpa_menyimpan(client, db, auth_headers,
     res = client.post(URL, json=jawaban(), headers=auth_headers())
     assert res.status_code == 503 and res.json()["detail"] == "Model mood belum tersedia di server."
     assert db.query(MoodQuestionnaire).count() == 0
+
+
+def test_respons_berisi_rekomendasi_task_hari_ini(client, db, auth_headers, hari_ini_beku):
+    headers = auth_headers(email="mood@contoh.com")
+    user = db.query(User).filter_by(email="mood@contoh.com").one()
+    milestone = Milestone(goal=Goal(user=user, judul_goal="Belajar Docker"), judul_milestone="M1")
+    for jam, (nama, effort, impact) in enumerate(
+        [("Ringan penting", "low", "high"), ("Berat", "high", "low"), ("Biasa", "medium", "medium")], start=8
+    ):
+        t = Task(milestone=milestone, nama_task=nama, tingkat_effort=effort, tingkat_impact=impact)
+        mulai = datetime(2026, 10, 5, jam)
+        db.add(JadwalTask(task=t, waktu_mulai=mulai, waktu_selesai=mulai.replace(minute=30), status="terjadwal"))
+    db.commit()
+
+    body = isi(client, headers, q1=1, q2=1, q3=1, q4=1, q5=1)  # LOW → maks 2 task
+    rekomendasi = body["rekomendasi"]
+    assert [t["nama_task"] for t in rekomendasi["direkomendasikan"]] == ["Ringan penting", "Biasa"]
+    assert [t["nama_task"] for t in rekomendasi["disarankan_ditunda"]] == ["Berat"]
+    pertama = rekomendasi["direkomendasikan"][0]
+    assert (pertama["id_goal"], pertama["tingkat_effort"], pertama["tingkat_impact"]) == (
+        milestone.id_goal, "low", "high"
+    )
+    assert pertama["sesi"] == [{"id_jadwal": pertama["sesi"][0]["id_jadwal"],
+                                "waktu_mulai": "2026-10-05T08:00:00", "waktu_selesai": "2026-10-05T08:30:00"}]
+    assert client.get(f"{URL}/hari-ini", headers=headers).json()["rekomendasi"] == rekomendasi
+
+
+def test_rekomendasi_kosong_tanpa_jadwal(client, auth_headers, hari_ini_beku):
+    body = isi(client, auth_headers())
+    assert body["rekomendasi"] == {"direkomendasikan": [], "disarankan_ditunda": []}

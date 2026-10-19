@@ -2,7 +2,7 @@
 
 Satu hasil per user per hari (tanggal WIB): mengisi ulang di hari yang sama menimpa hasil sebelumnya.
 Yang disimpan hanya jawaban + `hasil_akhir` (capacity_index); detail hasil dihitung ulang dari jawaban
-karena model mood deterministik.
+karena model mood deterministik. Respons juga berisi rekomendasi task hari ini (app/services/mood_service.py).
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -12,8 +12,15 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, get_db
 from app.core import waktu
 from app.models import MoodQuestionnaire, QuestionnaireAnswer, User
-from app.schemas.mood import MoodAnswers, MoodHariIni
-from app.services import ai_service
+from app.schemas.mood import (
+    MoodAnswers,
+    MoodAssessment,
+    MoodHariIni,
+    RekomendasiRead,
+    SesiHariIni,
+    TaskRekomendasi,
+)
+from app.services import ai_service, mood_service
 
 router = APIRouter()
 
@@ -31,6 +38,36 @@ def _mood_hari_ini(db: Session, user: User) -> MoodQuestionnaire | None:
             MoodQuestionnaire.id_user == user.id_user, MoodQuestionnaire.tanggal == waktu.hari_ini()
         )
     ).first()
+
+
+def _ke_task_rekomendasi(item: mood_service.TaskHariIni) -> TaskRekomendasi:
+    t = item.task
+    return TaskRekomendasi(
+        id_task=t.id_task,
+        id_goal=t.milestone.id_goal,
+        nama_task=t.nama_task,
+        tingkat_effort=t.tingkat_effort,
+        tingkat_impact=t.tingkat_impact,
+        deadline=t.deadline,
+        sesi=[SesiHariIni(id_jadwal=s.id_jadwal, waktu_mulai=s.waktu_mulai, waktu_selesai=s.waktu_selesai)
+              for s in item.sesi],
+    )
+
+
+def _respons(
+    db: Session, user: User, baris: MoodQuestionnaire, jawaban: MoodAnswers, hasil: MoodAssessment
+) -> MoodHariIni:
+    rekomendasi = mood_service.rekomendasi_hari_ini(db, user, hasil, baris.tanggal)
+    return MoodHariIni(
+        id_questionnaire=baris.id_questionnaire,
+        tanggal=baris.tanggal,
+        jawaban=jawaban,
+        hasil=hasil,
+        rekomendasi=RekomendasiRead(
+            direkomendasikan=[_ke_task_rekomendasi(i) for i in rekomendasi.direkomendasikan],
+            disarankan_ditunda=[_ke_task_rekomendasi(i) for i in rekomendasi.disarankan_ditunda],
+        ),
+    )
 
 
 def _jawaban_tersimpan(baris: MoodQuestionnaire) -> MoodAnswers:
@@ -59,7 +96,7 @@ def isi_kuesioner_mood(
     ]
     db.commit()
     db.refresh(baris)
-    return MoodHariIni(id_questionnaire=baris.id_questionnaire, tanggal=baris.tanggal, jawaban=payload, hasil=hasil)
+    return _respons(db, current_user, baris, payload, hasil)
 
 
 @router.get("/hari-ini", response_model=MoodHariIni)
@@ -70,6 +107,4 @@ def lihat_mood_hari_ini(
     if baris is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Kuesioner mood hari ini belum diisi")
     jawaban = _jawaban_tersimpan(baris)
-    return MoodHariIni(
-        id_questionnaire=baris.id_questionnaire, tanggal=baris.tanggal, jawaban=jawaban, hasil=_nilai_mood(jawaban)
-    )
+    return _respons(db, current_user, baris, jawaban, _nilai_mood(jawaban))
