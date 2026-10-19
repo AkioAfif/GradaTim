@@ -1,5 +1,6 @@
 """Pydantic request/response schemas - mood.py (FR-6 & FR-7)"""
 
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -34,3 +35,12 @@ class MoodAssessment(BaseModel):
     max_tasks: int
     total_mood_score: int
     recommendation_message: str
+
+
+class MoodHariIni(BaseModel):
+    """Hasil kuesioner mood user pada satu tanggal (respons POST /mood & GET /mood/hari-ini)."""
+
+    id_questionnaire: int
+    tanggal: date
+    jawaban: MoodAnswers
+    hasil: MoodAssessment
