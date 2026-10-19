@@ -2,7 +2,8 @@
 demo_jadwal.py — Demo penjadwal otomatis GradaTim (untuk laporan / bukti pekerjaan)
 
 Alur:
-    1. Ambil hasil Goal Decomposition yang sudah tersimpan (JSON dari demo_ai.py) — tanpa memanggil LLM
+    1. Ambil rencana goal yang sudah tersimpan (JSON dari demo_rencana.py / demo_ai.py) — tanpa memanggil LLM;
+       yang dijadwalkan adalah task minggu ke-1 (D11), dalam satu minggu kalender
     2. Hitung slot luang = jam aktif − kegiatan rutin − agenda (keputusan D10)
     3. Jadwalkan task otomatis, merata per hari (FR-4)
     4. Validasi tidak ada bentrok (FR-5)
@@ -13,11 +14,10 @@ Hasil dicetak ke console dan disimpan ke scripts/demo_output/jadwal_<waktu>.md
 
 Cara pakai (dari folder backend/, venv aktif):
     python scripts/demo_jadwal.py
-    python scripts/demo_jadwal.py --json scripts/demo_output/demo_xxx_decomposition.json --mulai 2026-10-05
+    python scripts/demo_jadwal.py --json scripts/demo_output/rencana_xxx.json --mulai 2026-10-05
 """
 
 import argparse
-import math
 import sys
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
@@ -27,7 +27,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 sys.stdout.reconfigure(encoding="utf-8")
 
-from app.schemas.ai_decomposition import GoalDecomposition  # noqa: E402
+from app.schemas.ai_decomposition import RencanaGoal  # noqa: E402
 from app.services.scheduler import (  # noqa: E402
     BusyBlock,
     Interval,
@@ -56,17 +56,17 @@ KEGIATAN_RUTIN = (
 
 
 def parse_args():
-    latest = sorted(OUTPUT_DIR.glob("demo_*_decomposition.json"))
+    latest = sorted(OUTPUT_DIR.glob("*rencana*.json"), key=lambda p: p.stat().st_mtime)
     today = date.today()
     next_monday = today + timedelta(days=(7 - today.weekday()) % 7 or 7)
     parser = argparse.ArgumentParser(description="Demo penjadwal otomatis GradaTim")
     parser.add_argument("--json", type=Path, default=latest[-1] if latest else None,
-                        help="Hasil dekomposisi dari demo_ai.py (default: yang terbaru)")
+                        help="Rencana dari demo_rencana.py / demo_ai.py (default: yang terbaru)")
     parser.add_argument("--mulai", type=date.fromisoformat, default=next_monday,
                         help="Tanggal mulai goal, sebaiknya hari Senin (default: Senin depan)")
     args = parser.parse_args()
     if args.json is None:
-        sys.exit("Belum ada hasil dekomposisi. Jalankan dulu: python scripts/demo_ai.py")
+        sys.exit("Belum ada rencana tersimpan. Jalankan dulu: python scripts/demo_rencana.py")
     return args
 
 
@@ -107,18 +107,19 @@ def load_md(sessions) -> list[str]:
 
 def main():
     args = parse_args()
-    decomposition = GoalDecomposition.model_validate_json(args.json.read_text(encoding="utf-8"))
-    tasks_raw = [t for m in decomposition.milestones for t in m.tasks]
+    rencana = RencanaGoal.model_validate_json(args.json.read_text(encoding="utf-8"))
+    tasks_raw = rencana.task_minggu_ini
     titles = {t.task_number: t.task_title for t in tasks_raw}
+    target = rencana.bulan[0].minggu[0]
 
     start = datetime.combine(args.mulai, time.min)
-    weeks = math.ceil(decomposition.estimated_total_days / 7)
+    weeks = 1  # task dirinci per minggu (D11): hanya task minggu ke-1 yang sudah ada
     end = start + timedelta(days=7 * weeks)
     agenda = [BusyBlock(Interval(start + timedelta(days=RAB, hours=19), start + timedelta(days=RAB, hours=21)),
                         "agenda", "Rapat himpunan")]
 
     md = [f"# Demo Penjadwal GradaTim — {datetime.now():%d %B %Y, %H:%M}", "",
-          f"- **Goal:** {decomposition.goal_title} ({len(tasks_raw)} task, sumber: `{args.json.name}`)",
+          f"- **Target minggu ke-1:** {target.judul} ({len(tasks_raw)} task, sumber: `{args.json.name}`)",
           f"- **Periode:** {args.mulai:%d/%m/%Y} – {(end - timedelta(days=1)):%d/%m/%Y} ({weeks} minggu)",
           "- **Jam aktif (contoh):** 08:00–21:00 setiap hari",
           "- **Kegiatan rutin (contoh):** Kuliah Sen–Kam 08–15 & Jum 08–11 · Gym Sel & Kam 16:00–17:30 · "
@@ -128,8 +129,8 @@ def main():
     # ---------------- 1. JADWAL OTOMATIS (FR-4) ----------------
     blocks = busy_blocks(start, end, KEGIATAN_RUTIN, agenda)
     slots = free_slots(JAM_AKTIF, start, end, busy=[b.interval for b in blocks])
-    tasks = [TaskToSchedule(t.task_number, t.estimated_minutes, tuple(t.depends_on),
-                            earliest=start + timedelta(days=t.day_number - 1)) for t in tasks_raw]
+    tasks = [TaskToSchedule(t.task_number, t.estimated_minutes, tuple(t.depends_on), earliest=start)
+             for t in tasks_raw]
     result = schedule_tasks(tasks, slots)
     conflicts = validate_schedule(result.sessions, blocks)
 

@@ -9,17 +9,10 @@ from openai import OpenAIError
 
 from ai_model.mood_predictor import MODEL_PATH
 from app.core import waktu
-from app.schemas.ai_decomposition import GoalDecomposition, GoalDecompositionRequest, GoalPlan
+from app.schemas.ai_decomposition import GoalDecompositionRequest, GoalPlan
 from app.schemas.mood import MoodAnswers
 from app.services import ai_service
-from app.services.ai_service import AIServiceError, assess_mood, decompose_goal, recommend_tasks, rencanakan_goal
-
-TODAY = date(2026, 10, 1)
-
-
-def _task(title, day, minutes=30, effort="medium", impact="medium", number=0, deps=()):
-    return {"task_number": number, "depends_on": list(deps), "task_title": title, "day_number": day,
-            "estimated_minutes": minutes, "effort_level": effort, "impact_level": impact}
+from app.services.ai_service import AIServiceError, assess_mood, recommend_tasks, rencanakan_goal
 
 
 def _fake_client(parsed):
@@ -27,141 +20,6 @@ def _fake_client(parsed):
     message = SimpleNamespace(parsed=parsed)
     client.chat.completions.parse.return_value = SimpleNamespace(choices=[SimpleNamespace(message=message)])
     return client
-
-
-def _request(deadline=date(2026, 10, 14), **kwargs):
-    return GoalDecompositionRequest(judul_goal="Belajar Docker", deadline=deadline, **kwargs)
-
-
-# ------------------------------------------------------------
-# GOAL DECOMPOSITION
-# ------------------------------------------------------------
-
-def test_decompose_goal_normalizes_llm_output():
-    raw = GoalDecomposition.model_validate({
-        "goal_title": "Belajar Docker",
-        "estimated_total_days": 99,
-        "milestones": [
-            {"milestone_title": "Lanjutan", "order": 5, "tasks": [_task("Compose", 30, minutes=999)]},
-            {"milestone_title": "Kosong", "order": 2, "tasks": []},
-            {"milestone_title": "Dasar", "order": 3, "tasks": [_task("Dockerfile", 2), _task("Install", 0, minutes=1)]},
-        ],
-    })
-
-    result = decompose_goal(_request(), today=TODAY, client=_fake_client(raw))
-
-    assert [m.milestone_title for m in result.milestones] == ["Dasar", "Lanjutan"]
-    assert [m.order for m in result.milestones] == [1, 2]
-    dasar, lanjutan = result.milestones
-    assert [t.task_title for t in dasar.tasks] == ["Install", "Dockerfile"]  # diurutkan per hari
-    assert dasar.tasks[0].day_number == 1
-    assert dasar.tasks[0].estimated_minutes == ai_service.MIN_TASK_MINUTES
-    assert lanjutan.tasks[0].day_number == 14  # di-clamp ke deadline (1-14 Okt)
-    assert lanjutan.tasks[0].estimated_minutes == ai_service.MAX_TASK_MINUTES
-    assert result.estimated_total_days == 14
-
-
-def test_decompose_goal_normalizes_dependencies():
-    raw = GoalDecomposition.model_validate({
-        "goal_title": "x", "estimated_total_days": 3,
-        "milestones": [{"milestone_title": "m", "order": 1, "tasks": [
-            _task("Install", 1, number=10),
-            _task("Konsep", 2, number=20, deps=[10, 99]),       # 99 tidak ada → dibuang
-            _task("Praktik", 3, number=30, deps=[20, 30, 10]),  # diri sendiri → dibuang
-            _task("Salah arah", 1, number=40, deps=[30]),       # prasyarat di hari lebih belakang → dibuang
-        ]}],
-    })
-    tasks = decompose_goal(_request(), today=TODAY, client=_fake_client(raw)).milestones[0].tasks
-
-    by_title = {t.task_title: t for t in tasks}
-    assert [t.task_number for t in tasks] == [1, 2, 3, 4]  # dinomori ulang 1..N sesuai urutan
-    assert by_title["Konsep"].depends_on == [by_title["Install"].task_number]
-    assert by_title["Praktik"].depends_on == sorted([by_title["Install"].task_number, by_title["Konsep"].task_number])
-    assert by_title["Salah arah"].depends_on == []
-
-
-def test_decompose_goal_duplicate_task_numbers_drop_dependencies():
-    raw = GoalDecomposition.model_validate({
-        "goal_title": "x", "estimated_total_days": 2,
-        "milestones": [{"milestone_title": "m", "order": 1, "tasks": [
-            _task("A", 1, number=1), _task("B", 2, number=1, deps=[1]),
-        ]}],
-    })
-    tasks = decompose_goal(_request(), today=TODAY, client=_fake_client(raw)).milestones[0].tasks
-    assert [t.task_number for t in tasks] == [1, 2]
-    assert tasks[1].depends_on == []
-
-
-def test_decompose_goal_prompt_includes_constraints():
-    raw = GoalDecomposition.model_validate({
-        "goal_title": "x", "estimated_total_days": 1,
-        "milestones": [{"milestone_title": "m", "order": 1, "tasks": [_task("t", 1)]}],
-    })
-    client = _fake_client(raw)
-
-    decompose_goal(_request(menit_harian=90), today=TODAY, client=client)
-
-    kwargs = client.chat.completions.parse.call_args.kwargs
-    assert kwargs["response_format"] is GoalDecomposition
-    user_prompt = kwargs["messages"][1]["content"]
-    assert "14 hari tersedia" in user_prompt
-    assert "90 menit per hari" in user_prompt
-
-
-def test_decompose_goal_deadline_today_is_one_day():
-    raw = GoalDecomposition.model_validate({
-        "goal_title": "x", "estimated_total_days": 3,
-        "milestones": [{"milestone_title": "m", "order": 1, "tasks": [_task("t", 3)]}],
-    })
-    result = decompose_goal(_request(deadline=TODAY), today=TODAY, client=_fake_client(raw))
-    assert result.milestones[0].tasks[0].day_number == 1
-
-
-def test_decompose_goal_default_today_pakai_tanggal_wib(monkeypatch):
-    raw = GoalDecomposition.model_validate({
-        "goal_title": "x", "estimated_total_days": 1,
-        "milestones": [{"milestone_title": "m", "order": 1, "tasks": [_task("t", 1)]}],
-    })
-    monkeypatch.setattr(waktu, "hari_ini", lambda: TODAY)
-    client = _fake_client(raw)
-    decompose_goal(_request(), client=client)
-
-    user_prompt = client.chat.completions.parse.call_args.kwargs["messages"][1]["content"]
-    assert f"Tanggal hari ini: {TODAY.isoformat()}" in user_prompt
-
-
-def test_decompose_goal_rejects_past_deadline():
-    client = _fake_client(None)
-    with pytest.raises(AIServiceError, match="Deadline"):
-        decompose_goal(_request(deadline=date(2026, 9, 30)), today=TODAY, client=client)
-    client.chat.completions.parse.assert_not_called()
-
-
-def test_decompose_goal_refusal_raises():
-    with pytest.raises(AIServiceError):
-        decompose_goal(_request(), today=TODAY, client=_fake_client(None))
-
-
-def test_decompose_goal_all_milestones_empty_raises():
-    raw = GoalDecomposition.model_validate({
-        "goal_title": "x", "estimated_total_days": 1,
-        "milestones": [{"milestone_title": "m", "order": 1, "tasks": []}],
-    })
-    with pytest.raises(AIServiceError, match="tidak menghasilkan task"):
-        decompose_goal(_request(), today=TODAY, client=_fake_client(raw))
-
-
-def test_decompose_goal_wraps_api_error():
-    client = MagicMock()
-    client.chat.completions.parse.side_effect = OpenAIError("boom")
-    with pytest.raises(AIServiceError, match="tidak tersedia"):
-        decompose_goal(_request(), today=TODAY, client=client)
-
-
-def test_decompose_goal_without_api_key(monkeypatch):
-    monkeypatch.setattr(ai_service.settings, "LLM_API_KEY", None)
-    with pytest.raises(AIServiceError, match="LLM_API_KEY"):
-        decompose_goal(_request(), today=TODAY)
 
 
 # ------------------------------------------------------------
@@ -298,6 +156,12 @@ def test_rencanakan_goal_refusal_dan_error_api():
     with pytest.raises(AIServiceError, match="tidak tersedia"):
         rencanakan_goal(_rencana_request(), today=RABU, client=client)
 
+
+
+def test_rencanakan_goal_tanpa_api_key(monkeypatch):
+    monkeypatch.setattr(ai_service.settings, "LLM_API_KEY", None)
+    with pytest.raises(AIServiceError, match="LLM_API_KEY"):
+        rencanakan_goal(_rencana_request(), today=RABU)
 
 # ------------------------------------------------------------
 # MOOD CAPACITY

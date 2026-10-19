@@ -17,7 +17,6 @@ from ai_model.mood_predictor import filter_tasks_by_capacity, predict_capacity
 from app.core import waktu
 from app.core.config import settings
 from app.schemas.ai_decomposition import (
-    GoalDecomposition,
     GoalDecompositionRequest,
     GoalPlan,
     PlannedTarget,
@@ -40,114 +39,14 @@ class AIServiceError(Exception):
 
 
 # ============================================================
-# GOAL DECOMPOSITION (FR-2)
+# LLM CLIENT
 # ============================================================
-
-SYSTEM_PROMPT = """Kamu adalah perencana target pribadi untuk aplikasi GradaTim.
-Tugasmu memecah satu goal besar menjadi milestone berurutan, lalu setiap milestone menjadi task harian yang konkret.
-
-Aturan:
-- Tulis semua judul dalam Bahasa Indonesia, singkat, dan diawali kata kerja (contoh: "Install Docker Desktop & verifikasi CLI").
-- Setiap task harus bisa langsung dikerjakan tanpa perlu dipecah lagi, dan hasilnya jelas terlihat.
-- Buat 2-6 milestone. Setiap milestone berisi 2-8 task.
-- day_number dimulai dari 1 dan tidak boleh melebihi jumlah hari yang tersedia.
-- Sebar task secara merata; jangan menumpuk banyak task berat di hari yang sama.
-- Sisakan hari-hari terakhir sebagai buffer bila waktunya longgar.
-- estimated_minutes realistis, antara 10 dan 240 menit per task.
-- effort_level: seberapa berat usaha/energi mental task tersebut (low/medium/high).
-- impact_level: seberapa besar kontribusi task terhadap tercapainya goal (low/medium/high).
-- task_number: nomor unik 1, 2, 3, ... berurutan di seluruh goal (bukan per milestone).
-- depends_on: daftar task_number yang WAJIB selesai sebelum task ini bisa dikerjakan
-  (contoh: "Jalankan container" bergantung pada "Install Docker"). Hanya boleh menunjuk task
-  dengan day_number lebih awal atau sama. Kosongkan ([]) jika tidak ada prasyarat.
-- Jangan membuat pengguna kewalahan: lebih baik task kecil yang konsisten daripada task besar yang menakutkan."""
-
-
-def _build_user_prompt(request: GoalDecompositionRequest, today: date, total_days: int) -> str:
-    lines = [
-        f"Goal: {request.judul_goal}",
-        f"Deskripsi: {request.deskripsi or '-'}",
-        f"Tanggal hari ini: {today.isoformat()}",
-        f"Deadline: {request.deadline.isoformat()} ({total_days} hari tersedia, hari ke-1 = hari ini)",
-    ]
-    if request.menit_harian:
-        lines.append(
-            f"Waktu luang pengguna: maksimal {request.menit_harian} menit per hari. "
-            "Total estimated_minutes di hari yang sama tidak boleh melebihi batas ini."
-        )
-    return "\n".join(lines)
-
-
-def _normalize(result: GoalDecomposition, total_days: int) -> GoalDecomposition:
-    """Jangan percaya output LLM mentah: rapikan urutan & clamp angka ke rentang valid."""
-    milestones = [m for m in result.milestones if m.tasks]
-    if not milestones:
-        raise AIServiceError("AI tidak menghasilkan task apa pun. Coba perjelas deskripsi goal-mu.")
-
-    milestones.sort(key=lambda m: m.order)
-    for index, milestone in enumerate(milestones, start=1):
-        milestone.order = index
-        for task in milestone.tasks:
-            task.day_number = min(max(task.day_number, 1), total_days)
-            task.estimated_minutes = min(max(task.estimated_minutes, MIN_TASK_MINUTES), MAX_TASK_MINUTES)
-        milestone.tasks.sort(key=lambda t: t.day_number)
-
-    result.milestones = milestones
-    _normalize_dependencies([t for m in milestones for t in m.tasks])
-    result.estimated_total_days = max(t.day_number for m in milestones for t in m.tasks)
-    return result
-
-
-def _normalize_dependencies(tasks: list) -> None:
-    """
-    Nomori ulang task 1..N sesuai urutan akhir, lalu bersihkan depends_on:
-    buang referensi ke task yang tidak ada / diri sendiri / task yang lebih belakang
-    (aturan terakhir sekaligus mencegah dependensi melingkar).
-    """
-    old_numbers = [t.task_number for t in tasks]
-    numbers_unique = len(set(old_numbers)) == len(old_numbers)
-    renumber = {old: new for new, old in enumerate(old_numbers, start=1)} if numbers_unique else {}
-
-    for new_number, task in enumerate(tasks, start=1):
-        task.task_number = new_number
-        # nomor dari LLM duplikat → tidak bisa dipetakan dengan aman, dependensi dibuang
-        mapped = {renumber[d] for d in task.depends_on if d in renumber}
-        task.depends_on = sorted(d for d in mapped if d < new_number and tasks[d - 1].day_number <= task.day_number)
-
 
 def _get_client() -> OpenAI:
     if not settings.LLM_API_KEY:
         raise AIServiceError("LLM_API_KEY belum diset di .env")
     # max_retries: 429/503 (kuota / server Gemini penuh) sering hanya sesaat, SDK retry dengan backoff
     return OpenAI(api_key=settings.LLM_API_KEY, base_url=settings.LLM_BASE_URL, timeout=90, max_retries=4)
-
-
-def decompose_goal(
-    request: GoalDecompositionRequest,
-    today: Optional[date] = None,
-    client: Optional[OpenAI] = None,
-) -> GoalDecomposition:
-    """
-    Pecah goal user menjadi milestone & task harian (kontrak JSON di spesifikasi bagian 5A).
-
-    Args:
-        request: judul, deskripsi, deadline, dan (opsional) menit luang per hari
-        today: override tanggal hari ini (untuk testing). Default: tanggal hari ini di WIB,
-            bukan tanggal server (di container Docker jam server = UTC)
-        client: override LLM client (untuk testing)
-
-    Raises:
-        AIServiceError: deadline sudah lewat, API gagal, atau output AI tidak bisa dipakai
-    """
-    today = today or waktu.hari_ini()
-    total_days = (request.deadline - today).days + 1  # inklusif: deadline hari ini = 1 hari
-    if total_days < 1:
-        raise AIServiceError("Deadline sudah lewat. Pilih tanggal hari ini atau setelahnya.")
-
-    result = _panggil_llm(
-        client or _get_client(), SYSTEM_PROMPT, _build_user_prompt(request, today, total_days), GoalDecomposition
-    )
-    return _normalize(result, total_days)
 
 
 def _panggil_llm(client: OpenAI, system_prompt: str, user_prompt: str, response_format: type[T]) -> T:
@@ -294,7 +193,14 @@ def rencanakan_goal(
     Kerangka tanggal dihitung sistem (`rencana.kerangka_rencana`): minggu Senin–Minggu mulai hari ini,
     dikelompokkan per bulan kalender. AI hanya mengisi judul & tujuan serta task minggu ke-1.
 
-    Args / Raises: sama dengan `decompose_goal`.
+    Args:
+        request: judul, deskripsi, deadline, dan (opsional) menit luang per hari
+        today: override tanggal hari ini (untuk testing). Default: tanggal hari ini di WIB,
+            bukan tanggal server (di container Docker jam server = UTC)
+        client: override LLM client (untuk testing)
+
+    Raises:
+        AIServiceError: deadline sudah lewat, API gagal, atau output AI tidak bisa dipakai
     """
     today = today or waktu.hari_ini()
     if request.deadline < today:

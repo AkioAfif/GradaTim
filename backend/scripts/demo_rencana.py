@@ -21,7 +21,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 from app.core import waktu  # noqa: E402
 from app.core.config import settings  # noqa: E402
-from app.schemas.ai_decomposition import GoalDecompositionRequest  # noqa: E402
+from app.schemas.ai_decomposition import GoalDecompositionRequest, RencanaGoal  # noqa: E402
 from app.services.ai_service import AIServiceError, _kerangka_teks, rencanakan_goal  # noqa: E402
 from app.services.rencana import kerangka_rencana  # noqa: E402
 
@@ -37,6 +37,25 @@ def parse_args():
     parser.add_argument("--deadline", type=date.fromisoformat, default=hari_ini + timedelta(days=45))
     parser.add_argument("--menit", type=int, default=60, help="menit luang per hari")
     return parser.parse_args()
+
+
+def rencana_md(rencana: RencanaGoal) -> list[str]:
+    """Target bulanan → mingguan + tabel task minggu ke-1 (Markdown). Dipakai juga oleh demo_ai.py."""
+    md = []
+    for b in rencana.bulan:
+        md += [f"### Bulan {b.bulan_ke}: {b.judul}", f"_{b.deskripsi}_", ""]
+        for m in b.minggu:
+            md.append(f"- **Minggu {m.minggu_ke}** ({m.mulai:%d/%m}–{m.akhir:%d/%m}): {m.judul} — {m.deskripsi}")
+        md.append("")
+
+    total = sum(t.estimated_minutes for t in rencana.task_minggu_ini)
+    md += [f"### Task minggu ke-1 ({len(rencana.task_minggu_ini)} task, total {total} menit)", "",
+           "| # | Task | Menit | Effort | Impact | Butuh |", "| ---: | --- | ---: | --- | --- | --- |"]
+    for t in rencana.task_minggu_ini:
+        butuh = ", ".join(f"#{d}" for d in t.depends_on) or "-"
+        md.append(f"| {t.task_number} | {t.task_title} | {t.estimated_minutes} | {t.effort_level} "
+                  f"| {t.impact_level} | {butuh} |")
+    return md
 
 
 def main():
@@ -57,20 +76,7 @@ def main():
         cause = f" ({e.__cause__})" if e.__cause__ else ""
         sys.exit(f"\n[GAGAL] {e}{cause}\nCek LLM_API_KEY / LLM_MODEL di backend/.env.")
     md += [f"## Hasil AI (`{settings.LLM_MODEL}`, {(datetime.now() - t0).total_seconds():.1f} detik)", ""]
-
-    for b in rencana.bulan:
-        md += [f"### Bulan {b.bulan_ke}: {b.judul}", f"_{b.deskripsi}_", ""]
-        for m in b.minggu:
-            md.append(f"- **Minggu {m.minggu_ke}** ({m.mulai:%d/%m}–{m.akhir:%d/%m}): {m.judul} — {m.deskripsi}")
-        md.append("")
-
-    total = sum(t.estimated_minutes for t in rencana.task_minggu_ini)
-    md += [f"## Task minggu ke-1 ({len(rencana.task_minggu_ini)} task, total {total} menit)", "",
-           "| # | Task | Menit | Effort | Impact | Butuh |", "| ---: | --- | ---: | --- | --- | --- |"]
-    for t in rencana.task_minggu_ini:
-        butuh = ", ".join(f"#{d}" for d in t.depends_on) or "-"
-        md.append(f"| {t.task_number} | {t.task_title} | {t.estimated_minutes} | {t.effort_level} "
-                  f"| {t.impact_level} | {butuh} |")
+    md += rencana_md(rencana)
 
     OUTPUT_DIR.mkdir(exist_ok=True)
     stem = f"rencana_{datetime.now():%Y%m%d_%H%M%S}"

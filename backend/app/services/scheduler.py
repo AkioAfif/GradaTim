@@ -181,7 +181,7 @@ class TaskToSchedule:
     minutes: durasi total task
     depends_on: task_number prasyarat. Prasyarat yang tidak ada di daftar yang sedang dijadwalkan
         dianggap sudah selesai (mis. task minggu lalu).
-    earliest: task tidak boleh dimulai sebelum waktu ini (mis. dari day_number hasil AI)
+    earliest: task tidak boleh dimulai sebelum waktu ini (mis. awal minggu task tersebut)
     """
 
     task_number: int
