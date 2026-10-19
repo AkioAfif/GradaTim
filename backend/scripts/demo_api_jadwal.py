@@ -4,7 +4,8 @@ demo_api_jadwal.py — Demo endpoint API kalender & penjadwalan lewat Swagger (u
 Script ini:
     1. Membuat database SQLite demo TERPISAH di folder temp (database tim di .env tidak disentuh)
     2. Mengisi data contoh untuk minggu ini: user demo, kegiatan rutin, agenda, 2 goal + task,
-       dan satu sesi yang sudah terlewat (untuk demo susun ulang)
+       satu sesi yang sudah terlewat (untuk demo susun ulang), dan goal ketiga dengan 3 sesi
+       malam ini (untuk demo kuesioner mood)
     3. Mencetak token login, lalu menjalankan server di http://127.0.0.1:8000/docs
 
 Data dibuat ulang setiap kali script dijalankan, jadi demo bisa diulang dari awal.
@@ -18,6 +19,11 @@ Lalu di http://127.0.0.1:8000/docs:
     3. GET  /api/v1/jadwal                  → isi kalender minggu ini
     4. PATCH /api/v1/jadwal/sesi/{id_jadwal} → pindah sesi ke jam kegiatan rutin → 409 bentrok
     5. POST /api/v1/jadwal/susun-ulang      → sesi terlewat dipindah
+    6. POST /api/v1/mood                    → isi semua jawaban 1 (mood LOW) → lihat `rekomendasi`
+    7. POST /api/v1/jadwal/susun-ulang      → body {"ditunda": [id_task dari `disarankan_ditunda`]}
+    8. GET  /api/v1/mood/hari-ini           → `disarankan_ditunda` sekarang kosong
+
+Langkah 6–8 paling rapi jika demo dijalankan sebelum jam 19:00 (sesi mood dibuat pukul 19:00–21:00 hari ini).
 """
 
 import os
@@ -49,7 +55,7 @@ EMAIL, PASSWORD = "demo@gradatim.id", "demo12345"
 SEN, SEL, RAB, KAM, JUM, SAB, MIN = range(7)
 
 
-def isi_data_demo(db, sekarang: datetime) -> tuple[User, Goal, Goal]:
+def isi_data_demo(db, sekarang: datetime) -> tuple[User, Goal, Goal, Goal]:
     user = User(nama="Argya (demo)", email=EMAIL, password=hash_password(PASSWORD))
     db.add(user)
     db.add_all([
@@ -84,8 +90,22 @@ def isi_data_demo(db, sekarang: datetime) -> tuple[User, Goal, Goal]:
     lalu = max((sekarang - timedelta(hours=3)).replace(minute=0, second=0, microsecond=0), awal_minggu(sekarang))
     db.add(JadwalTask(task=t_git, waktu_mulai=lalu, waktu_selesai=lalu + timedelta(hours=1), status=JADWAL_TERJADWAL))
 
+    # goal dengan 3 sesi malam ini, effort/impact berbeda → untuk demo rekomendasi mood
+    python = Goal(user=user, judul_goal="Belajar Python")
+    m_python = Milestone(goal=python, judul_milestone="Minggu 1: dasar Python", tipe="mingguan")
+    db.add_all([python, m_python])
+    for i, (nama, effort, impact) in enumerate([
+        ("Baca materi list & dict", "low", "high"),
+        ("Kerjakan 10 soal latihan", "high", "low"),
+        ("Rangkum catatan", "medium", "medium"),
+    ]):
+        t = Task(milestone=m_python, nama_task=nama, durasi_estimasi=30, tingkat_effort=effort, tingkat_impact=impact)
+        mulai = datetime.combine(sekarang.date(), time(19)) + timedelta(minutes=40 * i)
+        db.add_all([t, JadwalTask(task=t, waktu_mulai=mulai, waktu_selesai=mulai + timedelta(minutes=30),
+                                  status=JADWAL_TERJADWAL)])
+
     db.commit()
-    return user, docker, git
+    return user, docker, git, python
 
 
 def main():
@@ -93,9 +113,9 @@ def main():
         DEMO_DB.unlink()
     Base.metadata.create_all(engine)
     with SessionLocal() as db:
-        user, docker, git = isi_data_demo(db, datetime.now())
+        user, docker, git, python = isi_data_demo(db, datetime.now())
         token = create_access_token(user.id_user)
-        id_docker, id_git = docker.id_goal, git.id_goal
+        id_docker, id_git, id_python = docker.id_goal, git.id_goal, python.id_goal
 
     print("=" * 70)
     print("DEMO API KALENDER GRADATIM")
@@ -103,6 +123,7 @@ def main():
     print(f"Login         : {EMAIL} / {PASSWORD}")
     print(f"Goal          : Belajar Docker → id_goal = {id_docker}   (belum dijadwalkan)")
     print(f"                Belajar Git    → id_goal = {id_git}   (punya 1 sesi terlewat)")
+    print(f"                Belajar Python → id_goal = {id_python}   (3 sesi malam ini, untuk demo mood)")
     print("\nToken (klik 'Authorize' di /docs lalu tempel ini):\n")
     print(token)
     print("\nBuka: http://127.0.0.1:8000/docs   (Ctrl+C untuk berhenti)")

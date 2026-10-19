@@ -1,6 +1,7 @@
 """Pydantic request/response schemas - mood.py (FR-6 & FR-7)"""
 
-from typing import Literal
+from datetime import date, datetime
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -34,3 +35,38 @@ class MoodAssessment(BaseModel):
     max_tasks: int
     total_mood_score: int
     recommendation_message: str
+
+
+class SesiHariIni(BaseModel):
+    id_jadwal: int
+    waktu_mulai: datetime
+    waktu_selesai: datetime
+
+
+class TaskRekomendasi(BaseModel):
+    id_task: int
+    id_goal: int
+    nama_task: str
+    tingkat_effort: Optional[str]
+    tingkat_impact: Optional[str]
+    deadline: Optional[datetime]
+    sesi: list[SesiHariIni]  # sesi `terjadwal` task ini hari ini
+
+
+class RekomendasiRead(BaseModel):
+    """Task terjadwal hari ini dibagi sesuai mood (FR-7). Setelah user setuju, `id_task` dari
+    `disarankan_ditunda` dikirim sebagai `ditunda` ke POST /jadwal/susun-ulang (D7: task tidak hilang)."""
+
+    direkomendasikan: list[TaskRekomendasi]  # urut prioritas
+    disarankan_ditunda: list[TaskRekomendasi]
+
+
+class MoodHariIni(BaseModel):
+    """Hasil kuesioner mood user pada satu tanggal (respons POST /mood & GET /mood/hari-ini).
+    `rekomendasi` dihitung dari jadwal saat request, jadi ikut berubah jika jadwal berubah."""
+
+    id_questionnaire: int
+    tanggal: date
+    jawaban: MoodAnswers
+    hasil: MoodAssessment
+    rekomendasi: RekomendasiRead

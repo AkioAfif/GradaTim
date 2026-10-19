@@ -41,7 +41,24 @@ FR-4) yang menyimpan sesi ke `jadwal_task`.
 - `QuestionnaireAnswer.nomor_questionnaire` 1–5 = urutan `[fokus, tenang, motivasi, tidur, siap]`
   (sama dengan field `MoodAnswers.q1_focus` … `q5_readiness`).
 - `MoodQuestionnaire.hasil_akhir` = `MoodAssessment.capacity_index` (0 = LOW, 1 = MEDIUM, 2 = HIGH).
-- Endpoint kuesioner mood belum ada.
+- `POST /api/v1/mood` (`app/api/v1/mood.py`): satu hasil per user per tanggal WIB — mengisi ulang di hari yang
+  sama **menimpa** hasil lama. `GET /api/v1/mood/hari-ini` menghitung ulang hasil dari jawaban tersimpan.
+- Respons keduanya berisi `rekomendasi` (`app/services/mood_service.py`): task yang punya sesi `terjadwal`
+  hari ini dibagi menjadi `direkomendasikan` dan `disarankan_ditunda` lewat `recommend_tasks()`.
+  Pemetaan ke input `recommend_tasks()`:
+
+  | Input `recommend_tasks()` | Sumber DB |
+  | --- | --- |
+  | `task_number` | `task.id_task` |
+  | `effort_level` / `impact_level` | `task.tingkat_effort` / `tingkat_impact` (kosong → `medium`) |
+  | `day_number` (urgensi) | `task.deadline` relatif hari ini (hari ini = hari ke-1) |
+  | `depends_on` | `task_dependency`, hanya prasyarat yang belum selesai |
+
+  Prasyarat dianggap selesai jika `task.status = done` **atau** semua sesinya (selain `dilewati`) `selesai`
+  — sementara, selama `task.status` belum otomatis `done`.
+- **Alur D7 (task tidak hilang):** rekomendasi tidak mengubah jadwal. Setelah user setuju, frontend mengirim
+  `id_task` dari `disarankan_ditunda` ke `POST /api/v1/jadwal/susun-ulang` sebagai `{"ditunda": [...]}`;
+  sesinya dipindah mulai besok di minggu yang sama. Contoh lengkap: `tests/test_alur_mood_jadwal.py`.
 
 ## 4. Hal teknis lain
 

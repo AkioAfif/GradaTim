@@ -1,7 +1,7 @@
 """Aggregator route for v1"""
 
 from fastapi import APIRouter
-from app.api.v1 import agenda, auth, goals, jadwal, tasks, time_constraints
+from app.api.v1 import agenda, auth, goals, jadwal, mood, tasks, time_constraints
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -10,3 +10,4 @@ api_router.include_router(tasks.router, prefix="/tasks", tags=["tasks"])
 api_router.include_router(time_constraints.router, prefix="/time-constraints", tags=["time-constraints"])
 api_router.include_router(agenda.router, prefix="/agenda", tags=["agenda"])
 api_router.include_router(jadwal.router, prefix="/jadwal", tags=["jadwal"])
+api_router.include_router(mood.router, prefix="/mood", tags=["mood"])
