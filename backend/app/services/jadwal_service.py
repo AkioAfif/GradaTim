@@ -22,7 +22,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app.core.config import settings
-from app.core.status import JADWAL_DILEWATI, JADWAL_SELESAI, JADWAL_TERJADWAL, TASK_DONE
+from app.core.status import (
+    JADWAL_DILEWATI,
+    JADWAL_SELESAI,
+    JADWAL_TERJADWAL,
+    MILESTONE_TIPE_MINGGUAN,
+    TASK_DONE,
+)
 from app.models import Agenda, Goal, JadwalTask, Milestone, Task, TaskDependency, User
 from app.services.goal_service import urutan_milestone
 from app.services.kalender_service import agenda_ke_busy_block, kegiatan_rutin_user
@@ -139,9 +145,21 @@ class HasilPenjadwalan:
     tidak_muat: list[int] = field(default_factory=list)  # id_task yang tidak muat sebelum batas waktu
 
 
-def task_belum_terjadwal(db: DbSession, goal: Goal) -> list[Task]:
+def minggu_sudah_tiba(milestone: Milestone, sekarang: datetime) -> bool:
+    """Apakah task di milestone ini sudah boleh dijadwalkan pada minggu `sekarang` (D11).
+
+    Milestone mingguan baru boleh dijadwalkan saat minggunya tiba; minggunya dibaca dari deadline
+    (= Minggu 23:59 minggu itu, atau deadline goal untuk minggu terakhir). Minggu yang sudah lewat
+    tetap boleh (task yang tertinggal dikejar). Milestone lain / tanpa deadline selalu boleh."""
+    if milestone.tipe != MILESTONE_TIPE_MINGGUAN or milestone.deadline is None:
+        return True
+    return awal_minggu(milestone.deadline) <= awal_minggu(sekarang)
+
+
+def task_belum_terjadwal(db: DbSession, goal: Goal, sekarang: datetime) -> list[Task]:
     """Task goal yang perlu dijadwalkan: belum selesai, tidak punya sub-task (yang dikerjakan
-    sub-task-nya), dan belum punya sesi selain yang `dilewati`.
+    sub-task-nya), belum punya sesi selain yang `dilewati`, dan minggunya sudah tiba
+    (`minggu_sudah_tiba`) — task minggu depan tidak ikut dijadwalkan minggu ini.
     Diurutkan menurut urutan milestone, lalu id_task — penjadwal memakai urutan ini untuk task
     yang sama-sama siap dikerjakan."""
     tasks = db.scalars(
@@ -157,7 +175,10 @@ def task_belum_terjadwal(db: DbSession, goal: Goal) -> list[Task]:
             JadwalTask.status != JADWAL_DILEWATI,
         )
     ).all())
-    tasks = [t for t in tasks if t.id_task not in punya_sub and t.id_task not in sudah_terjadwal]
+    tasks = [
+        t for t in tasks
+        if t.id_task not in punya_sub and t.id_task not in sudah_terjadwal and minggu_sudah_tiba(t.milestone, sekarang)
+    ]
     return sorted(tasks, key=lambda t: (urutan_milestone(t.milestone), t.id_task))
 
 
@@ -196,13 +217,14 @@ def jadwalkan_goal(db: DbSession, user: User, goal: Goal, sekarang: datetime) ->
       Task yang tidak muat masuk `tidak_muat`, tidak pernah dijadwalkan melewati batas itu.
     - Sesi yang sudah ada (goal ini maupun goal lain) dianggap sibuk dan ikut dihitung dalam batas
       beban harian, sehingga hari yang sudah padat tidak ditambah lagi.
+    - Task milestone mingguan yang minggunya belum tiba tidak diambil (D11).
     - Task tanpa durasi_estimasi dianggap DEFAULT_DURASI_MENIT.
     - Prasyarat yang sudah terjadwal tapi belum selesai harus ditunggu sampai sesi terakhirnya selesai.
     """
     if goal.id_user != user.id_user:
         raise ValueError("Goal bukan milik user ini")
 
-    tasks = task_belum_terjadwal(db, goal)
+    tasks = task_belum_terjadwal(db, goal, sekarang)
     akhir = awal_minggu(sekarang) + timedelta(days=7)
     if goal.deadline is not None:
         akhir = min(akhir, goal.deadline)
