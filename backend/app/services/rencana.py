@@ -4,7 +4,8 @@ Sistem yang menghitung tanggal; AI hanya mengisi judul & tujuan tiap target (dan
     - Minggu = minggu kalender Senin–Minggu. Minggu ke-1 dimulai hari ini (bisa kurang dari 7 hari),
       minggu terakhir dipotong di deadline goal.
     - Bulan = bulan kalender. Minggu yang melintasi dua bulan masuk ke bulan yang memiliki hari
-      terbanyak dari minggu itu (seri → bulan yang lebih awal).
+      terbanyak dari minggu itu. Jika seri: minggu < 4 hari → bulan berikutnya (sisa bulan lama
+      terlalu pendek untuk jadi target sendiri), selain itu → bulan sebelumnya.
 Keputusan desain: docs/KEPUTUSAN_DESAIN_PENJADWALAN.md (D4, D11)
 """
 
@@ -56,9 +57,12 @@ def daftar_minggu(hari_ini: date, deadline: date) -> list[MingguRencana]:
 
 
 def _bulan_minggu(minggu: MingguRencana) -> tuple[int, int]:
-    """(tahun, bulan) yang memiliki hari terbanyak dari minggu ini; seri → yang lebih awal."""
+    """(tahun, bulan) yang memiliki hari terbanyak dari minggu ini (aturan seri: lihat docstring modul)."""
     hari = Counter((d.year, d.month) for d in (minggu.mulai + timedelta(days=i) for i in range(minggu.jumlah_hari)))
-    return max(sorted(hari), key=lambda b: hari[b])  # max() mengambil yang pertama jika seri
+    urut = sorted(hari)  # paling banyak dua bulan, urut kalender
+    if len(urut) == 2 and hari[urut[0]] == hari[urut[1]]:
+        return urut[1] if minggu.jumlah_hari < 4 else urut[0]
+    return max(urut, key=lambda b: hari[b])
 
 
 def kerangka_rencana(hari_ini: date, deadline: date) -> list[BulanRencana]:

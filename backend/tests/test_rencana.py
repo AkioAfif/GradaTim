@@ -71,12 +71,18 @@ def test_minggu_terpotong_dihitung_dari_hari_yang_benar_benar_ada():
     assert [b.nama for b in kerangka_rencana(d(9, 28), d(9, 30))] == ["September 2026"]
 
 
-def test_seri_masuk_bulan_lebih_awal():
-    # Sabtu 31 Okt + Minggu 1 Nov: 1–1 → Oktober; minggu berikutnya November
+def test_seri_kurang_dari_4_hari_masuk_bulan_berikutnya():
+    # Sabtu 31 Okt + Minggu 1 Nov: 1–1, 2 hari → November (tidak ada "Oktober" berisi 1 hari)
     bulan = kerangka_rencana(d(10, 31), d(11, 8))
-    assert [(b.nama, [m.minggu_ke for m in b.minggu]) for b in bulan] == [
-        ("Oktober 2026", [1]), ("November 2026", [2])
-    ]
+    assert [(b.nama, [m.minggu_ke for m in b.minggu]) for b in bulan] == [("November 2026", [1, 2])]
+
+
+@pytest.mark.parametrize("mulai, deadline, nama", [
+    (d(3, 30), d(4, 2), "Maret 2026"),      # Sen 30 Mar–Kam 2 Apr: 2–2, 4 hari → bulan sebelumnya
+    (d(9, 28), d(10, 3), "September 2026"),  # Sen 28 Sep–Sab 3 Okt: 3–3, 6 hari → bulan sebelumnya
+])
+def test_seri_4_hari_atau_lebih_masuk_bulan_sebelumnya(mulai, deadline, nama):
+    assert [b.nama for b in kerangka_rencana(mulai, deadline)] == [nama]
 
 
 def test_lintas_tahun():
