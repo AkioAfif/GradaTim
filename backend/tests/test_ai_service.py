@@ -9,17 +9,17 @@ from openai import OpenAIError
 
 from ai_model.mood_predictor import MODEL_PATH
 from app.core import waktu
-from app.schemas.ai_decomposition import GoalDecomposition, GoalDecompositionRequest
+from app.schemas.ai_decomposition import (
+    GoalDecompositionRequest,
+    GoalPlan,
+    ProgresTask,
+    RincianMingguRequest,
+    TargetMinggu,
+    WeekTasks,
+)
 from app.schemas.mood import MoodAnswers
 from app.services import ai_service
-from app.services.ai_service import AIServiceError, assess_mood, decompose_goal, recommend_tasks
-
-TODAY = date(2026, 10, 1)
-
-
-def _task(title, day, minutes=30, effort="medium", impact="medium", number=0, deps=()):
-    return {"task_number": number, "depends_on": list(deps), "task_title": title, "day_number": day,
-            "estimated_minutes": minutes, "effort_level": effort, "impact_level": impact}
+from app.services.ai_service import AIServiceError, assess_mood, recommend_tasks, rencanakan_goal, rinci_minggu
 
 
 def _fake_client(parsed):
@@ -29,139 +29,246 @@ def _fake_client(parsed):
     return client
 
 
-def _request(deadline=date(2026, 10, 14), **kwargs):
+# ------------------------------------------------------------
+# RENCANA BULANAN → MINGGUAN (D4, D11)
+# ------------------------------------------------------------
+
+RABU = date(2026, 10, 21)
+
+
+def _ptask(title, number, minutes=30, deps=()):
+    return {"task_number": number, "depends_on": list(deps), "task_title": title, "estimated_minutes": minutes,
+            "effort_level": "medium", "impact_level": "high"}
+
+
+def _target(number, title, description="Hasil"):
+    return {"number": number, "title": title, "description": description}
+
+
+def _plan(months=None, weeks=None, tasks=None):
+    return GoalPlan.model_validate({
+        "goal_title": "Belajar Docker",
+        "months": months if months is not None else [_target(1, "Dasar Docker"), _target(2, "Docker lanjutan")],
+        "weeks": weeks if weeks is not None else [_target(n, f"Minggu {n}") for n in range(1, 5)],
+        "first_week_tasks": tasks if tasks is not None else [_ptask("Install Docker", 1)],
+    })
+
+
+def _rencana_request(deadline=date(2026, 11, 10), **kwargs):  # Rabu 21 Okt → Selasa 10 Nov: 4 minggu, 2 bulan
     return GoalDecompositionRequest(judul_goal="Belajar Docker", deadline=deadline, **kwargs)
 
 
-# ------------------------------------------------------------
-# GOAL DECOMPOSITION
-# ------------------------------------------------------------
-
-def test_decompose_goal_normalizes_llm_output():
-    raw = GoalDecomposition.model_validate({
-        "goal_title": "Belajar Docker",
-        "estimated_total_days": 99,
-        "milestones": [
-            {"milestone_title": "Lanjutan", "order": 5, "tasks": [_task("Compose", 30, minutes=999)]},
-            {"milestone_title": "Kosong", "order": 2, "tasks": []},
-            {"milestone_title": "Dasar", "order": 3, "tasks": [_task("Dockerfile", 2), _task("Install", 0, minutes=1)]},
-        ],
-    })
-
-    result = decompose_goal(_request(), today=TODAY, client=_fake_client(raw))
-
-    assert [m.milestone_title for m in result.milestones] == ["Dasar", "Lanjutan"]
-    assert [m.order for m in result.milestones] == [1, 2]
-    dasar, lanjutan = result.milestones
-    assert [t.task_title for t in dasar.tasks] == ["Install", "Dockerfile"]  # diurutkan per hari
-    assert dasar.tasks[0].day_number == 1
-    assert dasar.tasks[0].estimated_minutes == ai_service.MIN_TASK_MINUTES
-    assert lanjutan.tasks[0].day_number == 14  # di-clamp ke deadline (1-14 Okt)
-    assert lanjutan.tasks[0].estimated_minutes == ai_service.MAX_TASK_MINUTES
-    assert result.estimated_total_days == 14
+def _prompt(client):
+    return client.chat.completions.parse.call_args.kwargs["messages"][1]["content"]
 
 
-def test_decompose_goal_normalizes_dependencies():
-    raw = GoalDecomposition.model_validate({
-        "goal_title": "x", "estimated_total_days": 3,
-        "milestones": [{"milestone_title": "m", "order": 1, "tasks": [
-            _task("Install", 1, number=10),
-            _task("Konsep", 2, number=20, deps=[10, 99]),       # 99 tidak ada → dibuang
-            _task("Praktik", 3, number=30, deps=[20, 30, 10]),  # diri sendiri → dibuang
-            _task("Salah arah", 1, number=40, deps=[30]),       # prasyarat di hari lebih belakang → dibuang
-        ]}],
-    })
-    tasks = decompose_goal(_request(), today=TODAY, client=_fake_client(raw)).milestones[0].tasks
+def test_rencanakan_goal_menempel_judul_ke_kerangka():
+    hasil = rencanakan_goal(_rencana_request(), today=RABU, client=_fake_client(_plan()))
 
-    by_title = {t.task_title: t for t in tasks}
-    assert [t.task_number for t in tasks] == [1, 2, 3, 4]  # dinomori ulang 1..N sesuai urutan
-    assert by_title["Konsep"].depends_on == [by_title["Install"].task_number]
-    assert by_title["Praktik"].depends_on == sorted([by_title["Install"].task_number, by_title["Konsep"].task_number])
-    assert by_title["Salah arah"].depends_on == []
+    assert [(b.bulan_ke, b.tahun, b.bulan, b.judul) for b in hasil.bulan] == [
+        (1, 2026, 10, "Dasar Docker"), (2, 2026, 11, "Docker lanjutan")
+    ]
+    oktober, november = hasil.bulan
+    assert [(m.minggu_ke, m.mulai, m.akhir, m.judul) for m in oktober.minggu] == [
+        (1, date(2026, 10, 21), date(2026, 10, 25), "Minggu 1"),
+        (2, date(2026, 10, 26), date(2026, 11, 1), "Minggu 2"),
+    ]
+    assert [(m.minggu_ke, m.akhir) for m in november.minggu] == [(3, date(2026, 11, 8)), (4, date(2026, 11, 10))]
+    assert [t.task_title for t in hasil.task_minggu_ini] == ["Install Docker"]
 
 
-def test_decompose_goal_duplicate_task_numbers_drop_dependencies():
-    raw = GoalDecomposition.model_validate({
-        "goal_title": "x", "estimated_total_days": 2,
-        "milestones": [{"milestone_title": "m", "order": 1, "tasks": [
-            _task("A", 1, number=1), _task("B", 2, number=1, deps=[1]),
-        ]}],
-    })
-    tasks = decompose_goal(_request(), today=TODAY, client=_fake_client(raw)).milestones[0].tasks
-    assert [t.task_number for t in tasks] == [1, 2]
-    assert tasks[1].depends_on == []
+def test_rencanakan_goal_prompt_berisi_kerangka_dan_batas_menit():
+    client = _fake_client(_plan())
+    rencanakan_goal(_rencana_request(menit_harian=60), today=RABU, client=client)
+
+    prompt = _prompt(client)
+    assert "Bulan 1 — Oktober 2026" in prompt and "Bulan 2 — November 2026" in prompt
+    assert "Minggu 1: 21 Okt 2026 – 25 Okt 2026 (5 hari)" in prompt
+    assert "Minggu 4: 9 Nov 2026 – 10 Nov 2026 (2 hari)" in prompt
+    assert "Minggu ke-1 hanya 5 hari" in prompt
+    assert "tidak boleh melebihi 300 menit" in prompt  # 60 menit × 5 hari
+    assert client.chat.completions.parse.call_args.kwargs["response_format"] is GoalPlan
 
 
-def test_decompose_goal_prompt_includes_constraints():
-    raw = GoalDecomposition.model_validate({
-        "goal_title": "x", "estimated_total_days": 1,
-        "milestones": [{"milestone_title": "m", "order": 1, "tasks": [_task("t", 1)]}],
-    })
-    client = _fake_client(raw)
-
-    decompose_goal(_request(menit_harian=90), today=TODAY, client=client)
-
-    kwargs = client.chat.completions.parse.call_args.kwargs
-    assert kwargs["response_format"] is GoalDecomposition
-    user_prompt = kwargs["messages"][1]["content"]
-    assert "14 hari tersedia" in user_prompt
-    assert "90 menit per hari" in user_prompt
+def test_rencanakan_goal_tanpa_menit_harian_tidak_ada_batas():
+    client = _fake_client(_plan())
+    rencanakan_goal(_rencana_request(), today=RABU, client=client)
+    assert "menit per hari" not in _prompt(client)
 
 
-def test_decompose_goal_deadline_today_is_one_day():
-    raw = GoalDecomposition.model_validate({
-        "goal_title": "x", "estimated_total_days": 3,
-        "milestones": [{"milestone_title": "m", "order": 1, "tasks": [_task("t", 3)]}],
-    })
-    result = decompose_goal(_request(deadline=TODAY), today=TODAY, client=_fake_client(raw))
-    assert result.milestones[0].tasks[0].day_number == 1
+def test_rencanakan_goal_target_hilang_diberi_judul_cadangan_dan_nomor_asing_dibuang():
+    plan = _plan(
+        months=[_target(2, "  "), _target(9, "Bulan asing")],
+        weeks=[_target(1, "Pertama"), _target(1, "Duplikat"), _target(3, " Ketiga "), _target(7, "Asing")],
+    )
+    hasil = rencanakan_goal(_rencana_request(), today=RABU, client=_fake_client(plan))
+
+    assert [b.judul for b in hasil.bulan] == ["Target Oktober 2026", "Target November 2026"]
+    assert [(m.judul, m.deskripsi) for b in hasil.bulan for m in b.minggu] == [
+        ("Pertama", "Hasil"), ("Target minggu ke-2", ""), ("Ketiga", "Hasil"), ("Target minggu ke-4", "")
+    ]
 
 
-def test_decompose_goal_default_today_pakai_tanggal_wib(monkeypatch):
-    raw = GoalDecomposition.model_validate({
-        "goal_title": "x", "estimated_total_days": 1,
-        "milestones": [{"milestone_title": "m", "order": 1, "tasks": [_task("t", 1)]}],
-    })
-    monkeypatch.setattr(waktu, "hari_ini", lambda: TODAY)
-    client = _fake_client(raw)
-    decompose_goal(_request(), client=client)
+def test_rencanakan_goal_normalisasi_task():
+    tasks = [
+        _ptask("Compose", 30, minutes=999, deps=[10, 30, 99]),  # diri sendiri & nomor asing dibuang
+        _ptask("Install", 10, minutes=1),
+        _ptask("Image", 20, deps=[30, 10]),  # menunjuk task yang lebih belakang → dibuang
+    ]
+    hasil = rencanakan_goal(_rencana_request(), today=RABU, client=_fake_client(_plan(tasks=tasks)))
 
-    user_prompt = client.chat.completions.parse.call_args.kwargs["messages"][1]["content"]
-    assert f"Tanggal hari ini: {TODAY.isoformat()}" in user_prompt
+    assert [(t.task_number, t.task_title, t.depends_on) for t in hasil.task_minggu_ini] == [
+        (1, "Install", []), (2, "Image", [1]), (3, "Compose", [1])
+    ]
+    assert hasil.task_minggu_ini[0].estimated_minutes == ai_service.MIN_TASK_MINUTES
+    assert hasil.task_minggu_ini[2].estimated_minutes == ai_service.MAX_TASK_MINUTES
 
 
-def test_decompose_goal_rejects_past_deadline():
+def test_rencanakan_goal_nomor_task_duplikat_dependensi_dibuang():
+    tasks = [_ptask("A", 1), _ptask("B", 1, deps=[1])]
+    hasil = rencanakan_goal(_rencana_request(), today=RABU, client=_fake_client(_plan(tasks=tasks)))
+    assert [(t.task_number, t.depends_on) for t in hasil.task_minggu_ini] == [(1, []), (2, [])]
+
+
+def test_rencanakan_goal_tanpa_task_error():
+    with pytest.raises(AIServiceError, match="tidak menghasilkan task"):
+        rencanakan_goal(_rencana_request(), today=RABU, client=_fake_client(_plan(tasks=[])))
+
+
+def test_rencanakan_goal_deadline_hari_ini_satu_minggu():
+    plan = _plan(months=[_target(1, "Kilat")], weeks=[_target(1, "Hari ini")])
+    hasil = rencanakan_goal(_rencana_request(deadline=RABU), today=RABU, client=_fake_client(plan))
+    assert [[(m.mulai, m.akhir) for m in b.minggu] for b in hasil.bulan] == [[(RABU, RABU)]]
+
+
+def test_rencanakan_goal_deadline_lewat_tanpa_memanggil_ai():
     client = _fake_client(None)
     with pytest.raises(AIServiceError, match="Deadline"):
-        decompose_goal(_request(deadline=date(2026, 9, 30)), today=TODAY, client=client)
+        rencanakan_goal(_rencana_request(deadline=date(2026, 10, 20)), today=RABU, client=client)
     client.chat.completions.parse.assert_not_called()
 
 
-def test_decompose_goal_refusal_raises():
-    with pytest.raises(AIServiceError):
-        decompose_goal(_request(), today=TODAY, client=_fake_client(None))
+def test_rencanakan_goal_default_today_pakai_tanggal_wib(monkeypatch):
+    monkeypatch.setattr(waktu, "hari_ini", lambda: RABU)
+    client = _fake_client(_plan())
+    rencanakan_goal(_rencana_request(), client=client)
+    assert "Tanggal hari ini: 2026-10-21" in _prompt(client)
 
 
-def test_decompose_goal_all_milestones_empty_raises():
-    raw = GoalDecomposition.model_validate({
-        "goal_title": "x", "estimated_total_days": 1,
-        "milestones": [{"milestone_title": "m", "order": 1, "tasks": []}],
-    })
-    with pytest.raises(AIServiceError, match="tidak menghasilkan task"):
-        decompose_goal(_request(), today=TODAY, client=_fake_client(raw))
-
-
-def test_decompose_goal_wraps_api_error():
+def test_rencanakan_goal_refusal_dan_error_api():
+    with pytest.raises(AIServiceError, match="tidak bisa memproses"):
+        rencanakan_goal(_rencana_request(), today=RABU, client=_fake_client(None))
     client = MagicMock()
     client.chat.completions.parse.side_effect = OpenAIError("boom")
     with pytest.raises(AIServiceError, match="tidak tersedia"):
-        decompose_goal(_request(), today=TODAY, client=client)
+        rencanakan_goal(_rencana_request(), today=RABU, client=client)
 
 
-def test_decompose_goal_without_api_key(monkeypatch):
+
+def test_rencanakan_goal_tanpa_api_key(monkeypatch):
     monkeypatch.setattr(ai_service.settings, "LLM_API_KEY", None)
     with pytest.raises(AIServiceError, match="LLM_API_KEY"):
-        decompose_goal(_request(), today=TODAY)
+        rencanakan_goal(_rencana_request(), today=RABU)
+
+# ------------------------------------------------------------
+# RINCIAN TASK PER MINGGU (D11)
+# ------------------------------------------------------------
+
+MINGGU_2 = TargetMinggu(minggu_ke=2, mulai=date(2026, 10, 26), akhir=date(2026, 11, 1),
+                        judul="Kuasai docker compose", deskripsi="Bisa menjalankan app + database")
+MINGGU_3 = TargetMinggu(minggu_ke=3, mulai=date(2026, 11, 2), akhir=date(2026, 11, 8),
+                        judul="Deploy ke server", deskripsi="")
+
+
+def _rincian(**kwargs):
+    data = {"judul_goal": "Belajar Docker", "deadline_goal": date(2026, 11, 10), "target": MINGGU_2,
+            "target_berikutnya": MINGGU_3, **kwargs}
+    return RincianMingguRequest(**data)
+
+
+def _week(tasks):
+    return WeekTasks.model_validate({"tasks": tasks})
+
+
+def test_rinci_minggu_prompt_berisi_target_progres_dan_konteks():
+    client = _fake_client(_week([_ptask("Tulis compose.yml", 1)]))
+    progres = [ProgresTask(minggu_ke=1, judul="Install Docker", menit=30, selesai=True),
+               ProgresTask(minggu_ke=1, judul="Buat Dockerfile", menit=60, selesai=False)]
+
+    hasil = rinci_minggu(_rincian(progres=progres), today=date(2026, 10, 24), client=client)  # Sabtu sebelumnya
+
+    assert [t.task_title for t in hasil] == ["Tulis compose.yml"]
+    prompt = _prompt(client)
+    assert "Target minggu ke-2 (26 Okt 2026 – 1 Nov 2026): Kuasai docker compose" in prompt
+    assert "Hasil yang ingin dicapai: Bisa menjalankan app + database" in prompt
+    assert "Sisa waktu minggu ini: 7 hari" in prompt  # minggu depan dirinci lebih awal: seminggu penuh
+    assert "Target minggu berikutnya (JANGAN dikerjakan sekarang): Deploy ke server" in prompt
+    assert "- [x] Minggu 1: Install Docker (30 menit)" in prompt
+    assert "- [ ] Minggu 1: Buat Dockerfile (60 menit)" in prompt
+    assert "Selesai 1 dari 2 task." in prompt
+    assert "menit per hari" not in prompt
+    kwargs = client.chat.completions.parse.call_args.kwargs
+    assert kwargs["response_format"] is WeekTasks
+    assert kwargs["messages"][0]["content"] == ai_service.WEEK_SYSTEM_PROMPT
+
+
+def test_rinci_minggu_minggu_berjalan_hanya_sisa_hari_dan_batas_menit_dikurangi_task_lama():
+    client = _fake_client(_week([_ptask("A", 1)]))
+    progres = [ProgresTask(minggu_ke=1, judul="Buat Dockerfile", menit=60, selesai=False),
+               ProgresTask(minggu_ke=1, judul="Tanpa estimasi", selesai=False)]
+
+    rinci_minggu(_rincian(progres=progres, menit_harian=60), today=date(2026, 10, 29), client=client)  # Kamis
+
+    prompt = _prompt(client)
+    assert "Sisa waktu minggu ini: 4 hari (29 Okt 2026 – 1 Nov 2026)" in prompt
+    assert "tidak boleh melebihi 180 menit" in prompt  # 60 × 4 hari − 60 menit task lama
+
+
+def test_rinci_minggu_tanpa_progres_dan_tanpa_task_lama():
+    client = _fake_client(_week([_ptask("A", 1)]))
+    rinci_minggu(_rincian(menit_harian=30), today=date(2026, 10, 26), client=client)
+    prompt = _prompt(client)
+    assert "(belum ada task sebelumnya)" in prompt
+    assert "tidak boleh melebihi 210 menit" in prompt
+
+
+def test_rinci_minggu_waktu_habis_oleh_task_lama():
+    client = _fake_client(_week([_ptask("A", 1)]))
+    progres = [ProgresTask(minggu_ke=1, judul="Besar", menit=240, selesai=False)]
+    rinci_minggu(_rincian(progres=progres, menit_harian=60), today=date(2026, 10, 30), client=client)  # 3 hari
+    assert "buat 1 task ringan saja" in _prompt(client)
+
+
+def test_rinci_minggu_normalisasi_task():
+    tasks = [_ptask("B", 5, minutes=500, deps=[3, 5]), _ptask("A", 3, minutes=1, deps=[5])]
+    hasil = rinci_minggu(_rincian(), today=date(2026, 10, 26), client=_fake_client(_week(tasks)))
+    assert [(t.task_number, t.task_title, t.depends_on, t.estimated_minutes) for t in hasil] == [
+        (1, "A", [], ai_service.MIN_TASK_MINUTES), (2, "B", [1], ai_service.MAX_TASK_MINUTES)
+    ]
+
+
+def test_rinci_minggu_tanpa_task_error():
+    with pytest.raises(AIServiceError, match="tidak menghasilkan task"):
+        rinci_minggu(_rincian(), today=date(2026, 10, 26), client=_fake_client(_week([])))
+
+
+def test_rinci_minggu_minggu_lewat_tanpa_memanggil_ai():
+    client = _fake_client(None)
+    with pytest.raises(AIServiceError, match="sudah lewat"):
+        rinci_minggu(_rincian(), today=date(2026, 11, 2), client=client)
+    client.chat.completions.parse.assert_not_called()
+
+
+def test_rinci_minggu_default_today_dan_error_api(monkeypatch):
+    monkeypatch.setattr(waktu, "hari_ini", lambda: date(2026, 10, 31))
+    client = _fake_client(_week([_ptask("A", 1)]))
+    rinci_minggu(_rincian(), client=client)
+    assert "Sisa waktu minggu ini: 2 hari" in _prompt(client)
+
+    client = MagicMock()
+    client.chat.completions.parse.side_effect = OpenAIError("boom")
+    with pytest.raises(AIServiceError, match="tidak tersedia"):
+        rinci_minggu(_rincian(), today=date(2026, 10, 26), client=client)
 
 
 # ------------------------------------------------------------

@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401 — daftarkan semua tabel ke Base.metadata
-from app.core.status import JADWAL_DILEWATI, JADWAL_SELESAI, JADWAL_TERJADWAL, TASK_DONE
+from app.core.status import JADWAL_DILEWATI, JADWAL_SELESAI, JADWAL_TERJADWAL, MILESTONE_TIPE_MINGGUAN, TASK_DONE
 from app.db.base import Base
 from app.models import Agenda, Goal, JadwalTask, Milestone, Task, TaskDependency, TimeConstraint, User
 from app.services import jadwal_service
@@ -20,6 +20,7 @@ from app.services.jadwal_service import (
     jam_aktif,
     jadwalkan_goal,
     ke_session,
+    minggu_sudah_tiba,
     muat_konteks,
     sesi_user,
     susun_ulang_minggu_ini,
@@ -263,6 +264,55 @@ def test_jadwalkan_goal_orders_nested_milestones_by_path(db, jam_8_21):
     jadwalkan_goal(db, user, goal, SENIN_PAGI)
 
     assert sesi_tersimpan(db, t_b1m2)[0].waktu_mulai < sesi_tersimpan(db, t_b2m1)[0].waktu_mulai
+
+
+def goal_mingguan(db, user):
+    """Goal dengan milestone mingguan minggu lalu, minggu ini (5-11 Okt), dan minggu depan; satu task 60 menit
+    per minggu, plus satu task di milestone tanpa deadline."""
+    goal = Goal(user=user, judul_goal="Belajar TOEFL")
+    tasks = {}
+    for nama, deadline in [("lalu", dt(4, 23, 59)), ("ini", dt(11, 23, 59)), ("depan", dt(18, 23, 59)), ("bebas", None)]:
+        m = Milestone(goal=goal, judul_milestone=f"Minggu {nama}", tipe=MILESTONE_TIPE_MINGGUAN, deadline=deadline)
+        tasks[nama] = Task(milestone=m, nama_task=f"Task {nama}", durasi_estimasi=60)
+        db.add_all([m, tasks[nama]])
+    db.add(goal)
+    db.flush()
+    return goal, tasks
+
+
+def test_minggu_sudah_tiba():
+    m = Milestone(judul_milestone="Minggu 3", tipe=MILESTONE_TIPE_MINGGUAN, deadline=dt(18, 23, 59))
+    assert not minggu_sudah_tiba(m, dt(11, 23, 59))  # Minggu malam sebelumnya: belum
+    assert minggu_sudah_tiba(m, dt(12, 0))  # Senin 00:00 minggunya
+    assert minggu_sudah_tiba(m, dt(25, 9))  # sudah lewat: tetap boleh (dikejar)
+    # minggu terakhir terpotong deadline goal (Rabu): minggunya tetap mulai Senin
+    terakhir = Milestone(judul_milestone="Minggu akhir", tipe=MILESTONE_TIPE_MINGGUAN, deadline=dt(14, 23, 59))
+    assert minggu_sudah_tiba(terakhir, dt(12, 8))
+    # milestone selain mingguan / tanpa deadline selalu boleh
+    assert minggu_sudah_tiba(Milestone(judul_milestone="Bulan", tipe="bulanan", deadline=dt(31, 23, 59)), dt(5, 8))
+    assert minggu_sudah_tiba(Milestone(judul_milestone="Manual", deadline=dt(30, 23, 59)), dt(5, 8))
+
+
+def test_jadwalkan_goal_skips_tasks_of_future_weeks(db, jam_8_21):
+    user, _ = buat_user(db)
+    goal, tasks = goal_mingguan(db, user)
+
+    hasil = jadwalkan_goal(db, user, goal, SENIN_PAGI)
+
+    assert {s.id_task for s in hasil.sesi_baru} == {tasks[n].id_task for n in ("lalu", "ini", "bebas")}
+    assert hasil.tidak_muat == []  # task minggu depan tidak dianggap "tidak muat", hanya belum waktunya
+    assert sesi_tersimpan(db, tasks["depan"]) == []
+
+
+def test_jadwalkan_goal_next_week_tasks_taken_when_week_arrives(db, jam_8_21):
+    user, _ = buat_user(db)
+    goal, tasks = goal_mingguan(db, user)
+    jadwalkan_goal(db, user, goal, SENIN_PAGI)
+
+    hasil = jadwalkan_goal(db, user, goal, dt(12, 8))
+
+    assert [s.id_task for s in hasil.sesi_baru] == [tasks["depan"].id_task]
+    assert dt(12, 8) <= hasil.sesi_baru[0].waktu_mulai < dt(19, 0)
 
 
 def test_jadwalkan_goal_default_duration(db, jam_8_21):

@@ -25,14 +25,14 @@
 | D1 | Kalender | Kalender **internal** GradaTim, tidak sinkron Google Calendar | ✅ |
 | D2 | Pemecahan task | Satu task **boleh dipecah** ke beberapa sesi/slot (yang penting task selesai) | ✅ |
 | D3 | Kegiatan rutin | Kegiatan rutin mingguan jadi **baseline otomatis** di kalender setiap minggu | ✅ (desain teknis 💡) |
-| D4 | Hierarki goal | Goal besar → **goal bulanan** → **goal mingguan** → task harian yang fleksibel | ✅ (desain teknis 💡) |
+| D4 | Hierarki goal | Goal besar → **goal bulanan** → **goal mingguan** → task harian yang fleksibel | ✅ diimplementasi |
 | D5 | Kepadatan jadwal | **Jangan** penuhi seluruh jam luang; task dibagi **merata dalam seminggu** | ✅ |
-| D6 | `menit_harian` | Dihitung **otomatis** dari jam luang (lihat D10), bukan input manual terpisah | ✅ |
+| D6 | `menit_harian` | Dihitung **otomatis** dari jam luang (lihat D10), bukan input manual terpisah | ✅ diimplementasi |
 | D7 | Mood vs jadwal | Task dalam seminggu fleksibel per hari; task yang tidak terambil karena mood **tidak hilang**, digeser ke hari lain di minggu itu | ✅ (interpretasi, lihat §5) |
 | D8 | Skip task | Dua konsekuensi: beban hari berikutnya naik **atau** goal besar mundur | ⏳ |
 | D9 | Agenda lain (FR-5) | Agenda sekali-jalan per minggu (selain rutin) bisa diinput manual oleh user | ✅ (desain teknis 💡) |
 | D10 | Input jam luang | **Tidak ada input jam luang terpisah** (hindari data redundan & kurangi fitur). Jam luang = jam aktif harian − kegiatan rutin − agenda | ✅ grup (jam aktif 💡) |
-| D11 | Rincian task | Task **dirinci per minggu** sesuai progres, bukan semua minggu di awal | ✅ grup |
+| D11 | Rincian task | Task **dirinci per minggu** sesuai progres, bukan semua minggu di awal | ✅ diimplementasi (job Senin ⏳) |
 | D12 | Skip task | **User memilih** konsekuensinya setiap kali skip (kejar ketertinggalan atau goal mundur) | ✅ grup (fitur tetap ⏳) |
 
 ## 3. Kegiatan rutin mingguan
@@ -66,18 +66,32 @@ Goal besar (mis. "Lulus TOEFL 550 dalam 3 bulan")
          └─ Task kecil  — dijadwalkan fleksibel di dalam minggunya, menyesuaikan kondisi harian (mood)
 ```
 
-**Dampak ke implementasi yang sudah ada:**
-- ERD sekarang hanya `goal → milestone → task`. Butuh satu level tambahan. 💡 Opsi: `milestone` dipakai untuk goal bulanan + tabel baru untuk goal mingguan, atau `milestone` dibuat bertingkat (kolom `id_parent_milestone` + `tipe` bulanan/mingguan).
-- AI decomposer (`app/services/ai_service.py`) sekarang menghasilkan `milestones → tasks` dengan `day_number`. Perlu diubah ke `bulan → minggu → task`, dan task cukup ditandai **minggu ke berapa**, bukan hari ke berapa.
+**Implementasi (ERD v2):** `milestone` dibuat bertingkat — `tipe = "bulanan"` (tanpa induk) → `tipe = "mingguan"`
+(`id_parent_milestone` = bulanannya) → `task`. Pemetaan lengkapnya ada di `backend/ai_model/CATATAN_INTEGRASI.md` §2.
 
 **Keputusan (D11, diskusi grup):** task **dirinci per minggu sesuai progres**, tidak semua di awal.
 
-Alur yang diusulkan 💡:
-1. Saat goal dibuat: AI memecah goal → **target bulanan → target mingguan** (judul & tujuan saja), lalu merinci **task untuk minggu pertama**.
-2. Setiap awal minggu: AI merinci task minggu itu berdasarkan target mingguan **dan progres minggu sebelumnya** (task yang belum selesai, yang di-skip, dsb.).
-3. Penjadwal (`schedule_tasks`) menempatkan task minggu itu ke slot luang minggu itu.
+**Aturan kerangka waktu** (diputuskan 19 Okt 2026, dihitung sistem di `app/services/rencana.py`, bukan oleh AI):
+- **Minggu = minggu kalender Senin–Minggu.** Minggu ke-1 mulai hari goal direncanakan, jadi bisa pendek (mis. Kamis–Minggu);
+  AI diberi tahu jumlah harinya. Minggu terakhir dipotong di deadline goal.
+- **Bulan = bulan kalender.** Minggu yang melintasi dua bulan masuk ke bulan yang memuat **lebih banyak hari** minggu itu.
+  Jika seri: minggu < 4 hari → bulan berikutnya, selain itu → bulan sebelumnya.
+- AI hanya mengisi judul & tujuan tiap target serta task; tanggal, jumlah minggu, dan jumlah bulan selalu dari sistem.
 
-Konsekuensi teknis: butuh pemicu "awal minggu" (mis. saat user pertama membuka aplikasi di minggu baru, atau job terjadwal), dan satu pemanggilan AI per goal aktif per minggu — masih aman untuk kuota Gemini free tier.
+**Alur:**
+1. Saat goal direncanakan (`POST /goals/{id}/decompose`): AI mengisi **target bulanan → target mingguan** untuk seluruh
+   durasi goal, lalu merinci **task untuk minggu ke-1** saja (`ai_service.rencanakan_goal`).
+2. Minggu berikutnya dirinci lewat `POST /goals/{id}/rinci-minggu?minggu=ini|depan` (`ai_service.rinci_minggu`),
+   berdasarkan target minggu itu **dan progres task minggu-minggu sebelumnya** (selesai / belum):
+   - `minggu=ini` dipanggil frontend saat user membuka goal di minggu yang belum punya task;
+   - `minggu=depan` = tombol "rinci minggu depan", hanya boleh **mulai hari Sabtu**;
+   - idempotent: minggu yang sudah punya task dikembalikan apa adanya tanpa memanggil AI.
+   Task lama yang belum selesai tetap ada (tidak dibuat ulang); batas menit minggu baru dikurangi menitnya.
+3. Penjadwal (`POST /jadwal/goal/{id}`) hanya mengambil task milestone mingguan yang **minggunya sudah tiba**
+   (`jadwal_service.minggu_sudah_tiba`); task minggu lalu yang belum selesai tetap ikut dikejar.
+
+Satu pemanggilan AI per goal aktif per minggu — masih aman untuk kuota Gemini free tier.
+⏳ Belakangan: job otomatis Senin 00:00 yang merinci minggu baru untuk semua goal aktif (sekarang dipicu frontend).
 
 ## 5. Kepadatan jadwal & hubungan dengan mood
 
@@ -117,25 +131,25 @@ Berlaku untuk implementasi `app/services/scheduler.py` kecuali diubah:
 | Fungsi | Memenuhi | Keputusan |
 | :--- | :--- | :--- |
 | `free_slots()` | slot luang = jam aktif − rutin − agenda − sesi lain | D3, D9, D10 |
-| `average_daily_minutes()` | pengganti input manual `menit_harian` (belum dihubungkan ke decomposer) | D6 |
+| `average_daily_minutes()` | pengganti input manual `menit_harian` (lewat `goal_service.hitung_menit_harian`) | D6 |
 | `schedule_tasks()` | penjadwalan otomatis, merata, boleh dipecah, urut dependensi | FR-4, D2, D5 |
 | `busy_blocks()`, `find_conflicts()`, `validate_schedule()` | deteksi bentrok, termasuk saat sesi dipindah manual | FR-5 |
 | `replan()` | jadwal ulang sesi terlewat & task yang ditunda karena mood, dalam minggu yang sama | FR-11, D7 |
 
-Demo: `python scripts/demo_jadwal.py` (dari folder `backend/`) — kalender 2 minggu + skenario re-planning, tanpa memanggil LLM.
+Demo: `python scripts/demo_jadwal.py` (dari folder `backend/`) — task minggu ke-1 di kalender satu minggu + skenario re-planning, tanpa memanggil LLM.
 
 ### Keterbatasan yang diketahui
 
 - **Sesi selalu ditaruh di slot paling awal dalam sehari** (mis. tepat setelah kuliah selesai, atau jam 08:00 di akhir pekan). Belum ada preferensi waktu (pagi/sore/malam). ❓ Perlu fitur preferensi jam belajar?
 - **Batas harian dinaikkan untuk semua hari sekaligus** jika ada task yang tidak muat. Pada data demo efeknya sudah kecil (hanya 1 hari bertambah), tetapi dengan banyak task berantai masih bisa membuat beban menumpuk di awal minggu.
-- **Jam aktif harian** masih konstanta di kode/demo (mis. 08:00–21:00), belum ada sumber resminya (D10).
-- Hasil AI decomposer masih memakai `day_number` (hari ke-N) sebagai batas paling awal; setelah decomposer diubah ke target mingguan (D4, D11), cukup "awal minggu".
+- **Jam aktif harian** masih default di config (`JAM_AKTIF_MULAI/SELESAI`, 06:00–22:00), belum bisa diatur per user (D10).
 
 ## 8. Perlu dibahas dengan tim
 
 Untuk Akio (sebaiknya **sebelum** migrasi Alembic awal di branch `542230` di-merge, agar cukup satu migrasi):
 - `time_constraint` dipakai ulang untuk kegiatan rutin (+ kolom `nama`); tabel `agenda`, `jadwal_task` (§3, §7)
-- Level target bulanan & mingguan (§4) — sekarang sudah diputuskan, bisa mulai didesain
+- ~~Level target bulanan & mingguan (§4)~~ — selesai (milestone bertingkat, ERD v2)
+- Endpoint baru untuk frontend: `POST /goals/{id}/rinci-minggu?minggu=ini|depan` (§4)
 - Kolom effort/impact & tabel dependensi task (lihat `backend/ai_model/CATATAN_INTEGRASI.md`)
 
 Untuk Annora (PM/UX):
@@ -149,3 +163,4 @@ Untuk Annora (PM/UX):
 | 4 Okt 2026 | Dokumen dibuat (D1–D9) |
 | 4 Okt 2026 | Hasil diskusi grup: D10 (tanpa input jam luang terpisah), D11 (task dirinci per minggu), D12 (user memilih konsekuensi skip). `time_constraint` diusulkan dipakai ulang untuk kegiatan rutin. |
 | 4 Okt 2026 | Penjadwal FR-4, FR-5, FR-11 selesai diimplementasi (§7: status, keterbatasan). Aturan baru: task tidak dipecah hanya demi batas harian; batas harian minimal sebesar task terbesar. |
+| 20 Okt 2026 | D4 & D11 diimplementasi (§4): kerangka minggu/bulan kalender, rencana bulanan → mingguan, rincian task per minggu (`rinci-minggu`, minggu depan mulai Sabtu), penjadwal hanya mengambil minggu yang sudah tiba. |

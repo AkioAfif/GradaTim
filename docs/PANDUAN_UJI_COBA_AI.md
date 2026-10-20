@@ -54,15 +54,20 @@ Hanya Langkah 4 yang butuh API key. Langkah lain jalan tanpa internet.
 Hasil yang diharapkan: semua `PASSED` (67 tes). Nama tesnya sengaja deskriptif — membaca daftar ini
 saja sudah memberi gambaran aturan yang dijamin, mis. `test_replan_deferred_by_mood_moves_to_tomorrow`.
 
-## 4. Goal Decomposition + rekomendasi mood
+## 4. Rencana goal + rekomendasi mood
 
 ```powershell
 .\venv\Scripts\python.exe scripts\demo_ai.py
 ```
 
-Yang terjadi: goal contoh ("Belajar Docker & CI/CD") dipecah Gemini jadi milestone & task, lalu
-3 skenario mood (kurang prima / biasa / prima) masing-masing diberi rekomendasi task.
-Hasil tersimpan di `scripts\demo_output\demo_<waktu>.md` + `..._decomposition.json`.
+Yang terjadi: sistem menghitung kerangka minggu (Senin–Minggu, minggu ke-1 mulai hari ini) dan bulan kalender
+sampai deadline, lalu Gemini mengisi target bulanan → mingguan dan merinci task **minggu ke-1** saja (D4, D11).
+Setelah itu 3 skenario mood (kurang prima / biasa / prima) masing-masing diberi rekomendasi dari task minggu ke-1.
+Hasil tersimpan di `scripts\demo_output\demo_<waktu>.md` + `..._rencana.json`.
+
+Hanya ingin melihat rencananya (tanpa mood)? Pakai `scripts\demo_rencana.py` dengan opsi yang sama
+(`--goal`, `--deskripsi`, `--deadline`, `--menit`), ditambah `--hari-ini 2026-10-31` untuk mencoba minggu
+pertama yang pendek.
 
 **Coba variasi ini** dan perhatikan bedanya:
 
@@ -76,18 +81,29 @@ Hasil tersimpan di `scripts\demo_output\demo_<waktu>.md` + `..._decomposition.js
 # mood-mu hari ini (fokus, tenang, motivasi, tidur, siap — masing-masing 1-5)
 .\venv\Scripts\python.exe scripts\demo_ai.py --mood 3,2,4,2,3
 
-# simulasi hari ke-5: task hari 1-4 dianggap selesai
-.\venv\Scripts\python.exe scripts\demo_ai.py --hari 5
-
 # tanpa API key / internet: data contoh (BUKAN hasil AI)
 .\venv\Scripts\python.exe scripts\demo_ai.py --offline
 ```
 
 Hal yang menarik diamati:
-- Apakah pecahan task dari AI masuk akal untuk goal-mu? Apakah durasinya realistis?
+- Apakah target bulanan → mingguan berurutan dan masuk akal? Apakah minggu yang pendek diberi target lebih kecil?
+- Apakah task minggu ke-1 muat di waktu luangmu? Apakah durasinya realistis?
 - Kolom **Butuh** (dependensi): apakah AI membuat rantai lurus (tiap task butuh task sebelumnya)?
 - Rekomendasi mood LOW vs HIGH: apakah jumlah dan jenis task-nya berbeda?
 - Jalankan goal yang sama 2 kali — hasil AI tidak selalu sama.
+
+**Rincian minggu berikutnya (D11).** Memakai rencana terbaru, sebagian task minggu ke-1 dianggap selesai, lalu AI
+merinci task minggu ke-2 — sama seperti tombol "rinci minggu depan" di aplikasi. JSON rencana tidak menyimpan judul
+goal, jadi isi `--goal` / `--deskripsi` sama seperti saat membuat rencananya:
+
+```powershell
+.\venv\Scripts\python.exe scripts\demo_rinci_minggu.py --goal "Lulus TOEFL 550" --deskripsi "Skor sekarang 450" --menit 60
+
+# semua task minggu ke-1 belum selesai: apakah AI memberi task lebih sedikit/ringan?
+.\venv\Scripts\python.exe scripts\demo_rinci_minggu.py --goal "Lulus TOEFL 550" --selesai "" --menit 60
+```
+
+Perhatikan: apakah task minggu ke-2 melanjutkan (bukan mengulang) minggu ke-1, dan tidak mengambil target minggu ke-3?
 
 ## 5. Penjadwal otomatis
 
@@ -95,8 +111,8 @@ Hal yang menarik diamati:
 .\venv\Scripts\python.exe scripts\demo_jadwal.py
 ```
 
-Memakai hasil dekomposisi **terbaru** dari Langkah 4 (tanpa memanggil AI lagi), lalu:
-1. menjadwalkan task ke kalender 2 minggu di sekitar contoh jadwal kuliah, gym, dan rapat;
+Memakai rencana **terbaru** dari Langkah 4 (tanpa memanggil AI lagi), lalu:
+1. menjadwalkan task minggu ke-1 ke kalender satu minggu di sekitar contoh jadwal kuliah, gym, dan rapat;
 2. memastikan tidak ada bentrok;
 3. mensimulasikan Rabu pagi: task Selasa terlewat dan mood user LOW → jadwal disusun ulang.
 
@@ -105,8 +121,8 @@ dengan **Markdown Preview** (`Ctrl+Shift+V`) supaya tabelnya rapi.
 
 Opsi:
 ```powershell
-# pakai hasil dekomposisi tertentu & tanggal mulai tertentu
-.\venv\Scripts\python.exe scripts\demo_jadwal.py --json scripts\demo_output\demo_20260925_061008_decomposition.json --mulai 2026-10-05
+# pakai rencana tertentu & tanggal mulai tertentu
+.\venv\Scripts\python.exe scripts\demo_jadwal.py --json scripts\demo_output\rencana_20261019_203928.json --mulai 2026-10-05
 ```
 
 Jadwal kuliah/gym contohnya ada di bagian atas `scripts\demo_jadwal.py` (`JAM_AKTIF`,
@@ -224,7 +240,7 @@ Coba juga:
 | `[GAGAL] LLM_API_KEY belum diset` | `.env` belum ada / key belum diisi (Langkah 2). |
 | `Error code: 503 ... high demand` | Server Gemini sedang penuh. Tunggu beberapa menit, atau ganti `LLM_MODEL` di `.env` (mis. `gemini-3.5-flash-lite`). |
 | `Error code: 429` | Kuota gratis habis. Tunggu (biasanya reset harian) atau pakai model lain. |
-| `Belum ada hasil dekomposisi` saat `demo_jadwal.py` | Jalankan Langkah 4 dulu, atau pakai `--json` ke file yang sudah ada. |
+| `Belum ada rencana tersimpan` saat `demo_jadwal.py` | Jalankan Langkah 4 dulu, atau pakai `--json` ke file `..._rencana.json` / `rencana_*.json` yang sudah ada. File `..._decomposition.json` lama (format sebelum D11) tidak bisa dipakai lagi. |
 | Tabel di file `.md` berantakan | Buka dengan Markdown Preview di VS Code (`Ctrl+Shift+V`). |
 
 ## Referensi
