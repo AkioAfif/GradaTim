@@ -190,7 +190,7 @@ def test_patch_status_diabaikan(client, auth_headers):
 
 @pytest.mark.parametrize("method, path", [
     ("get", URL), ("post", URL), ("get", f"{URL}/1"), ("patch", f"{URL}/1"), ("delete", f"{URL}/1"),
-    ("post", f"{URL}/1/decompose"),
+    ("post", f"{URL}/1/decompose"), ("post", f"{URL}/1/rinci-minggu"),
 ])
 def test_tanpa_token_401(client, method, path):
     kwargs = {"json": _goal()} if method in ("post", "patch") else {}
@@ -206,6 +206,7 @@ def test_isolasi_antar_user_404(client, auth_headers, ai):
     assert client.patch(path, json={"judul_goal": "Dibajak"}, headers=b).status_code == 404
     assert client.delete(path, headers=b).status_code == 404
     assert client.post(f"{path}/decompose", headers=b).status_code == 404
+    assert client.post(f"{path}/rinci-minggu", headers=b).status_code == 404
     assert client.get(URL, headers=b).json() == []
     assert ai.panggilan == []
     assert client.get(path, headers=a).json()["judul_goal"] == "Belajar Docker"

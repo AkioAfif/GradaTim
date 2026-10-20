@@ -101,6 +101,15 @@ def _milestone_ke_read(milestone: Milestone) -> MilestoneRead:
     )
 
 
+class RincianMingguRead(BaseModel):
+    baru: bool = Field(description="False = minggu itu sudah dirinci sebelumnya; task yang ada dikembalikan, AI tidak dipanggil")
+    milestone: MilestoneRead  # milestone mingguan beserta task-nya
+
+
+def rincian_ke_read(milestone: Milestone, baru: bool) -> RincianMingguRead:
+    return RincianMingguRead(baru=baru, milestone=_milestone_ke_read(milestone))
+
+
 def goal_ke_detail(goal: Goal, milestones: list[Milestone]) -> GoalDetail:
     """Mapper ORM → GoalDetail. `milestones` sudah urut dan sudah memuat tasks + prasyarat."""
     return GoalDetail(

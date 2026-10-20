@@ -1,6 +1,7 @@
 """FR-2: AI Goal Decomposition & CRUD"""
 
-from typing import Optional
+from datetime import timedelta
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import exists, select
@@ -15,7 +16,16 @@ from app.models.milestone import Milestone
 from app.models.task import Task
 from app.models.user import User
 from app.schemas.ai_decomposition import GoalDecompositionRequest
-from app.schemas.goal import DecomposeRequest, GoalCreate, GoalDetail, GoalRead, GoalUpdate, goal_ke_detail
+from app.schemas.goal import (
+    DecomposeRequest,
+    GoalCreate,
+    GoalDetail,
+    GoalRead,
+    GoalUpdate,
+    RincianMingguRead,
+    goal_ke_detail,
+    rincian_ke_read,
+)
 from app.services import ai_service, goal_service
 
 router = APIRouter()
@@ -39,6 +49,16 @@ def _detail(db: Session, goal: Goal) -> GoalDetail:
 
 def _tolak(kode: int, detail: str) -> HTTPException:
     return HTTPException(status_code=kode, detail=detail)
+
+
+def _menit_harian(db: Session, user: User, payload: Optional[DecomposeRequest]) -> int:
+    """menit_harian dari body bila diisi, selain itu dihitung dari jam aktif − kegiatan rutin (D6)."""
+    if payload is not None and payload.menit_harian is not None:
+        return payload.menit_harian
+    try:
+        return goal_service.hitung_menit_harian(db, user)
+    except goal_service.WaktuLuangTidakCukup as e:
+        raise _tolak(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
 
 
 @router.get("", response_model=list[GoalRead])
@@ -121,13 +141,7 @@ def decompose_goal(
     if not replace and db.scalar(select(exists().where(Milestone.id_goal == goal.id_goal))):
         raise _tolak(status.HTTP_409_CONFLICT, "Goal sudah didekomposisi")
 
-    if payload is not None and payload.menit_harian is not None:
-        menit_harian = payload.menit_harian
-    else:
-        try:
-            menit_harian = goal_service.hitung_menit_harian(db, current_user)
-        except goal_service.WaktuLuangTidakCukup as e:
-            raise _tolak(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
+    menit_harian = _menit_harian(db, current_user, payload)
 
     request = GoalDecompositionRequest(
         judul_goal=goal.judul_goal,
@@ -143,3 +157,46 @@ def decompose_goal(
     goal_service.simpan_dekomposisi(db, goal, rencana)
     db.refresh(goal)
     return _detail(db, goal)
+
+
+HARI_SABTU = 5  # date.weekday()
+
+
+@router.post("/{id_goal}/rinci-minggu", response_model=RincianMingguRead)
+def rinci_minggu(
+    id_goal: int,
+    minggu: Literal["ini", "depan"] = "ini",
+    payload: Optional[DecomposeRequest] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RincianMingguRead:
+    """Rinci task untuk target mingguan minggu ini (atau minggu depan, mulai hari Sabtu) dengan AI,
+    berdasarkan progres task minggu-minggu sebelumnya (D11).
+
+    Idempotent: bila minggu itu sudah punya task, task yang ada dikembalikan (`baru: false`) tanpa
+    memanggil AI. Endpoint ini tidak menjadwalkan; panggil `POST /jadwal/goal/{id_goal}` sesudahnya
+    (task minggu depan baru masuk jadwal saat minggunya tiba).
+    """
+    goal = _ambil(db, id_goal, current_user)
+    today = waktu.hari_ini()
+    tanggal = today
+    if minggu == "depan":
+        if today.weekday() < HARI_SABTU:
+            raise _tolak(status.HTTP_409_CONFLICT, "Task minggu depan baru bisa dirinci mulai hari Sabtu")
+        tanggal = today + timedelta(days=7)
+
+    milestone = goal_service.milestone_minggu(db, goal, tanggal)
+    if milestone is None:
+        raise _tolak(status.HTTP_404_NOT_FOUND, f"Goal tidak punya target untuk minggu {minggu}")
+    if milestone.tasks:
+        return rincian_ke_read(milestone, baru=False)
+
+    request = goal_service.rincian_minggu_request(db, goal, milestone, _menit_harian(db, current_user, payload))
+    try:
+        tasks = ai_service.rinci_minggu(request, today=today)
+    except ai_service.AIServiceError as e:
+        raise _tolak(status.HTTP_502_BAD_GATEWAY, f"Gagal merinci minggu dengan AI: {e}") from e
+
+    goal_service.simpan_task_minggu(db, milestone, tasks)
+    db.refresh(milestone)
+    return rincian_ke_read(milestone, baru=True)
