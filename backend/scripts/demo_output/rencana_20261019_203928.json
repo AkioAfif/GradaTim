@@ -1,0 +1,158 @@
+{
+  "bulan": [
+    {
+      "bulan_ke": 1,
+      "tahun": 2026,
+      "bulan": 10,
+      "judul": "Dasar TOEFL & Evaluasi Awal",
+      "deskripsi": "Memahami format tes TOEFL dan mengukur kemampuan awal di bagian Listening dan Reading.",
+      "minggu": [
+        {
+          "minggu_ke": 1,
+          "mulai": "2026-10-19",
+          "akhir": "2026-10-25",
+          "judul": "Kenali Format Tes & Diagnostic Test",
+          "deskripsi": "Mengetahui struktur ujian TOEFL dan menyelesaikan tes diagnostik pertama untuk baseline skor."
+        },
+        {
+          "minggu_ke": 2,
+          "mulai": "2026-10-26",
+          "akhir": "2026-11-01",
+          "judul": "Dasar Listening Section",
+          "deskripsi": "Mulai membiasakan telinga dengan aksen bahasa Inggris percakapan pendek TOEFL."
+        }
+      ]
+    },
+    {
+      "bulan_ke": 2,
+      "tahun": 2026,
+      "bulan": 11,
+      "judul": "Penguasaan Grammar & Strategi Bagian",
+      "deskripsi": "Menguasai struktur tata bahasa yang sering keluar serta strategi pengerjaan Structure dan Reading.",
+      "minggu": [
+        {
+          "minggu_ke": 3,
+          "mulai": "2026-11-02",
+          "akhir": "2026-11-08",
+          "judul": "Structure & Written Expression Dasar",
+          "deskripsi": "Mempelajari pola kalimat dasar dan subject-verb agreement."
+        },
+        {
+          "minggu_ke": 4,
+          "mulai": "2026-11-09",
+          "akhir": "2026-11-15",
+          "judul": "Structure & Written Expression Lanjutan",
+          "deskripsi": "Menguasai clauses, inversions, dan pilihan kata yang sering mengecoh."
+        },
+        {
+          "minggu_ke": 5,
+          "mulai": "2026-11-16",
+          "akhir": "2026-11-22",
+          "judul": "Reading Comprehension Strategi",
+          "deskripsi": "Belajar teknik skimming, scanning, dan mencari main idea teks akademik."
+        },
+        {
+          "minggu_ke": 6,
+          "mulai": "2026-11-23",
+          "akhir": "2026-11-29",
+          "judul": "Vocabulary & Reading Detail Questions",
+          "deskripsi": "Memperkaya kosakata akademik dan menjawab pertanyaan rinci dalam bacaan."
+        }
+      ]
+    },
+    {
+      "bulan_ke": 3,
+      "tahun": 2026,
+      "bulan": 12,
+      "judul": "Simulasi Penuh & Pemantapan Akhir",
+      "deskripsi": "Melakukan latihan soal intensif dan simulasi tes penuh untuk mencapai target skor 550.",
+      "minggu": [
+        {
+          "minggu_ke": 7,
+          "mulai": "2026-11-30",
+          "akhir": "2026-12-06",
+          "judul": "Mini Tryout & Evaluasi Bulan Kedua",
+          "deskripsi": "Mengerjakan tryout parsial untuk menguji peningkatan di semua seksi."
+        },
+        {
+          "minggu_ke": 8,
+          "mulai": "2026-12-07",
+          "akhir": "2026-12-13",
+          "judul": "Simulasi TOEFL Full-Length Pertama",
+          "deskripsi": "Melakukan simulasi tes lengkap tanpa jeda untuk membangun stamina."
+        },
+        {
+          "minggu_ke": 9,
+          "mulai": "2026-12-14",
+          "akhir": "2026-12-20",
+          "judul": "Analisis Kesalahan & Perbaikan Lemah",
+          "deskripsi": "Fokus memperbaiki tipe soal yang paling sering salah saat simulasi."
+        },
+        {
+          "minggu_ke": 10,
+          "mulai": "2026-12-21",
+          "akhir": "2026-12-27",
+          "judul": "Simulasi TOEFL Full-Length Kedua",
+          "deskripsi": "Menguji kesiapan akhir dengan simulasi tes resmi di bawah waktu nyata."
+        },
+        {
+          "minggu_ke": 11,
+          "mulai": "2026-12-28",
+          "akhir": "2026-12-31",
+          "judul": "Review Akhir & Istirahat Mental",
+          "deskripsi": "Melakukan pengulangan ringan dan menjaga kondisi mental sebelum hari ujian."
+        }
+      ]
+    }
+  ],
+  "task_minggu_ini": [
+    {
+      "task_number": 1,
+      "depends_on": [],
+      "task_title": "Pelajari struktur dasar tes TOEFL ITP dan aturan penilaiannya",
+      "estimated_minutes": 60,
+      "effort_level": "low",
+      "impact_level": "medium"
+    },
+    {
+      "task_number": 2,
+      "depends_on": [
+        1
+      ],
+      "task_title": "Kerjakan diagnostic test bagian Listening tanpa jeda",
+      "estimated_minutes": 90,
+      "effort_level": "high",
+      "impact_level": "high"
+    },
+    {
+      "task_number": 3,
+      "depends_on": [
+        2
+      ],
+      "task_title": "Evaluasi jawaban salah dari diagnostic test Listening",
+      "estimated_minutes": 60,
+      "effort_level": "medium",
+      "impact_level": "high"
+    },
+    {
+      "task_number": 4,
+      "depends_on": [
+        1
+      ],
+      "task_title": "Kerjakan diagnostic test bagian Reading comprehension",
+      "estimated_minutes": 90,
+      "effort_level": "high",
+      "impact_level": "high"
+    },
+    {
+      "task_number": 5,
+      "depends_on": [
+        4
+      ],
+      "task_title": "Evaluasi kosakata baru yang ditemukan pada teks reading",
+      "estimated_minutes": 45,
+      "effort_level": "low",
+      "impact_level": "medium"
+    }
+  ]
+}
