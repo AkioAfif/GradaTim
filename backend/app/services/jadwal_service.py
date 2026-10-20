@@ -6,6 +6,7 @@ scheduler.py berisi logika murni tanpa database. Modul ini:
     - menjadwalkan task sebuah goal dan menyimpan sesinya ke tabel jadwal_task  (FR-4)
     - menyusun ulang jadwal minggu ini: sesi terlewat & task yang ditunda karena mood  (FR-11)
     - mengecek bentrok saat sesi dipindah manual  (FR-5)
+    - memperbarui status task dari status sesi-sesinya  (FR-10)
 
 Fungsi di sini hanya `flush`, tidak `commit` — commit dilakukan endpoint pemanggil.
 
@@ -28,6 +29,8 @@ from app.core.status import (
     JADWAL_TERJADWAL,
     MILESTONE_TIPE_MINGGUAN,
     TASK_DONE,
+    TASK_IN_PROGRESS,
+    TASK_TODO,
 )
 from app.models import Agenda, Goal, JadwalTask, Milestone, Task, TaskDependency, User
 from app.services.goal_service import urutan_milestone
@@ -370,3 +373,29 @@ def cek_bentrok(db: DbSession, user: User, waktu: Interval, kecuali_id_jadwal: i
         if r.id_jadwal != kecuali_id_jadwal
     ]
     return find_conflicts(waktu, blok)
+
+
+# ============================================================
+# STATUS TASK DARI SESI (FR-10)
+# ============================================================
+
+def perbarui_status_task(task: Task) -> str:
+    """Hitung ulang `task.status` dari sesi-sesinya, dipanggil setiap kali status sebuah sesi diubah.
+
+    Sesi `dilewati` tidak dihitung (sudah diganti sesi lain, atau tidak muat lagi).
+    - `done`: semua sesi lain sudah `selesai` DAN total menit sesi `selesai` >= durasi_estimasi
+      (tanpa durasi: cukup satu sesi `selesai`). Syarat menit mencegah task jadi `done` padahal sebagian
+      sesinya dilewati tanpa pengganti.
+    - `in_progress`: sudah ada sesi `selesai`, tapi belum memenuhi syarat `done`
+    - `todo`: belum ada sesi `selesai` (mis. sesi satu-satunya dibatalkan kembali ke `terjadwal`)
+    Status yang diubah manual lewat PATCH /tasks tetap, sampai ada sesi task itu yang diubah statusnya.
+    """
+    sesi = [s for s in task.jadwal if s.status != JADWAL_DILEWATI]
+    selesai = [s for s in sesi if s.status == JADWAL_SELESAI]
+    if not selesai:
+        task.status = TASK_TODO
+        return task.status
+    menit = sum(int((s.waktu_selesai - s.waktu_mulai).total_seconds() // 60) for s in selesai)
+    cukup = menit >= task.durasi_estimasi if task.durasi_estimasi else True
+    task.status = TASK_DONE if len(selesai) == len(sesi) and cukup else TASK_IN_PROGRESS
+    return task.status

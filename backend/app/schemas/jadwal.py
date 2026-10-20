@@ -27,6 +27,7 @@ class SesiRead(BaseModel):
     waktu_mulai: datetime
     waktu_selesai: datetime
     status: str  # terjadwal | selesai | dilewati
+    status_task: str  # todo | in_progress | done — ikut berubah saat sesi ditandai selesai / dibatalkan
 
 
 class JadwalMingguan(BaseModel):
