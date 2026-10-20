@@ -92,6 +92,19 @@ Hal yang menarik diamati:
 - Rekomendasi mood LOW vs HIGH: apakah jumlah dan jenis task-nya berbeda?
 - Jalankan goal yang sama 2 kali — hasil AI tidak selalu sama.
 
+**Rincian minggu berikutnya (D11).** Memakai rencana terbaru, sebagian task minggu ke-1 dianggap selesai, lalu AI
+merinci task minggu ke-2 — sama seperti tombol "rinci minggu depan" di aplikasi. JSON rencana tidak menyimpan judul
+goal, jadi isi `--goal` / `--deskripsi` sama seperti saat membuat rencananya:
+
+```powershell
+.\venv\Scripts\python.exe scripts\demo_rinci_minggu.py --goal "Lulus TOEFL 550" --deskripsi "Skor sekarang 450" --menit 60
+
+# semua task minggu ke-1 belum selesai: apakah AI memberi task lebih sedikit/ringan?
+.\venv\Scripts\python.exe scripts\demo_rinci_minggu.py --goal "Lulus TOEFL 550" --selesai "" --menit 60
+```
+
+Perhatikan: apakah task minggu ke-2 melanjutkan (bukan mengulang) minggu ke-1, dan tidak mengambil target minggu ke-3?
+
 ## 5. Penjadwal otomatis
 
 ```powershell
