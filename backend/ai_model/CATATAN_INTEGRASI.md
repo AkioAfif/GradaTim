@@ -86,11 +86,23 @@ ke `jadwal_task`.
   | `day_number` (urgensi) | `task.deadline` relatif hari ini (hari ini = hari ke-1) |
   | `depends_on` | `task_dependency`, hanya prasyarat yang belum selesai |
 
-  Prasyarat dianggap selesai jika `task.status = done` **atau** semua sesinya (selain `dilewati`) `selesai`
-  — sementara, selama `task.status` belum otomatis `done`.
+  Prasyarat dianggap selesai jika `task.status = done` (lihat "Status task otomatis" di bawah).
 - **Alur D7 (task tidak hilang):** rekomendasi tidak mengubah jadwal. Setelah user setuju, frontend mengirim
   `id_task` dari `disarankan_ditunda` ke `POST /api/v1/jadwal/susun-ulang` sebagai `{"ditunda": [...]}`;
   sesinya dipindah mulai besok di minggu yang sama. Contoh lengkap: `tests/test_alur_mood_jadwal.py`.
+- **Status task otomatis (FR-10):** setiap kali status sesi diubah lewat `PATCH /api/v1/jadwal/sesi/{id}`,
+  `task.status` dihitung ulang (`jadwal_service.perbarui_status_task`) dan dikembalikan di `status_task`:
+
+  | Kondisi sesi task (sesi `dilewati` tidak dihitung) | `task.status` |
+  | --- | --- |
+  | Semua sesi `selesai` **dan** total menit sesi `selesai` ≥ `durasi_estimasi` (tanpa durasi: ≥ 1 sesi) | `done` |
+  | Ada sesi `selesai`, tapi belum memenuhi baris di atas | `in_progress` |
+  | Belum ada sesi `selesai` | `todo` |
+
+  Syarat menit mencegah task jadi `done` padahal sebagian sesinya `dilewati` tanpa pengganti (minggu penuh).
+  Memindah sesi saja tidak mengubah status task; `PATCH /api/v1/tasks/{id}` (centang manual) tetap bisa dipakai
+  dan tidak menyentuh sesi. `task.status` adalah satu-satunya sumber "selesai" untuk rekomendasi mood dan
+  progres rincian minggu (`rinci-minggu`).
 
 ## 4. Hal teknis lain
 

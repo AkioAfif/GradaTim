@@ -13,7 +13,7 @@ from app.api.deps import get_db
 from app.api.v1 import jadwal as jadwal_api
 from app.core.config import settings
 from app.core.security import create_access_token
-from app.core.status import JADWAL_DILEWATI, JADWAL_SELESAI, JADWAL_TERJADWAL
+from app.core.status import JADWAL_DILEWATI, JADWAL_SELESAI, JADWAL_TERJADWAL, TASK_DONE, TASK_IN_PROGRESS, TASK_TODO
 from app.db.base import Base
 from app.main import app as fastapi_app
 from app.models import Agenda, Goal, JadwalTask, Milestone, Task, TimeConstraint, User
@@ -334,6 +334,44 @@ def test_ubah_sesi_mark_done_and_undo(client, db, data):
     assert sesi.status == JADWAL_SELESAI
 
     assert client.patch(url, json={"status": "terjadwal"}, headers=auth(user)).json()["status"] == JADWAL_TERJADWAL
+
+
+def test_ubah_sesi_updates_task_status(client, db, data):
+    """Task b (60 menit): sesi Selasa `dilewati`, sesi Rabu 60 menit menggantikannya."""
+    user, _, (_, b) = data
+    url = f"{URL}/sesi/{sesi_rabu(db, b).id_jadwal}"
+
+    res = client.patch(url, json={"status": "selesai"}, headers=auth(user))
+    assert res.json()["status_task"] == TASK_DONE
+    db.refresh(b)
+    assert b.status == TASK_DONE
+
+    res = client.patch(url, json={"status": "terjadwal"}, headers=auth(user))  # batal selesai
+    assert res.json()["status_task"] == TASK_TODO
+    db.refresh(b)
+    assert b.status == TASK_TODO
+
+
+def test_ubah_sesi_partial_task_in_progress(client, db, data):
+    user, _, (_, b) = data
+    rabu = sesi_rabu(db, b)
+    db.add(JadwalTask(task=b, waktu_mulai=dt(8, 9), waktu_selesai=dt(8, 10), status=JADWAL_TERJADWAL))
+    db.commit()
+
+    res = client.patch(f"{URL}/sesi/{rabu.id_jadwal}", json={"status": "selesai"}, headers=auth(user))
+
+    assert res.json()["status_task"] == TASK_IN_PROGRESS  # sesi Kamis masih terjadwal
+
+
+def test_ubah_sesi_move_only_keeps_manual_task_status(client, db, data):
+    user, _, (_, b) = data
+    b.status = TASK_DONE  # dicentang manual lewat PATCH /tasks
+    db.commit()
+
+    res = client.patch(f"{URL}/sesi/{sesi_rabu(db, b).id_jadwal}", headers=auth(user),
+                       json={"waktu_mulai": "2026-10-08T10:00:00", "waktu_selesai": "2026-10-08T11:00:00"})
+
+    assert res.status_code == 200 and res.json()["status_task"] == TASK_DONE
 
 
 def test_ubah_sesi_move_without_conflict(client, db, data):

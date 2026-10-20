@@ -11,7 +11,7 @@ from datetime import date, datetime, time, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from app.core.status import JADWAL_DILEWATI, JADWAL_SELESAI, JADWAL_TERJADWAL, TASK_DONE
+from app.core.status import JADWAL_TERJADWAL, TASK_DONE
 from app.models import JadwalTask, Task, User
 from app.schemas.mood import MoodAssessment
 from app.services import ai_service
@@ -31,22 +31,10 @@ class RekomendasiHariIni:
 
 
 def _task_selesai(db: DbSession, id_tasks: set[int]) -> set[int]:
-    """Task yang dianggap selesai: `task.status = done`, atau semua sesinya (selain `dilewati`) `selesai`.
-
-    Bagian kedua sementara, selama `task.status` belum otomatis `done` saat semua sesinya selesai —
-    tanpa itu task yang prasyaratnya sudah dikerjakan akan tertahan terus.
-    """
+    """Task berstatus `done` — diisi otomatis dari sesi (`jadwal_service.perbarui_status_task`) atau manual."""
     if not id_tasks:
         return set()
-    selesai = set(db.scalars(select(Task.id_task).where(Task.id_task.in_(id_tasks), Task.status == TASK_DONE)))
-    status_sesi: dict[int, set[str]] = {}
-    for id_task, status in db.execute(
-        select(JadwalTask.id_task, JadwalTask.status).where(
-            JadwalTask.id_task.in_(id_tasks), JadwalTask.status != JADWAL_DILEWATI
-        )
-    ):
-        status_sesi.setdefault(id_task, set()).add(status)
-    return selesai | {n for n, s in status_sesi.items() if s == {JADWAL_SELESAI}}
+    return set(db.scalars(select(Task.id_task).where(Task.id_task.in_(id_tasks), Task.status == TASK_DONE)))
 
 
 def _hari_ke(deadline: datetime | None, hari: date) -> int | None:

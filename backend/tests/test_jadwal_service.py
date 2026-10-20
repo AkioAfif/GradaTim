@@ -1,13 +1,21 @@
 """Unit tests untuk app/services/jadwal_service.py (database SQLite in-memory)"""
 
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 import app.models  # noqa: F401 — daftarkan semua tabel ke Base.metadata
-from app.core.status import JADWAL_DILEWATI, JADWAL_SELESAI, JADWAL_TERJADWAL, MILESTONE_TIPE_MINGGUAN, TASK_DONE
+from app.core.status import (
+    JADWAL_DILEWATI,
+    JADWAL_SELESAI,
+    JADWAL_TERJADWAL,
+    MILESTONE_TIPE_MINGGUAN,
+    TASK_DONE,
+    TASK_IN_PROGRESS,
+    TASK_TODO,
+)
 from app.db.base import Base
 from app.models import Agenda, Goal, JadwalTask, Milestone, Task, TaskDependency, TimeConstraint, User
 from app.services import jadwal_service
@@ -22,6 +30,7 @@ from app.services.jadwal_service import (
     ke_session,
     minggu_sudah_tiba,
     muat_konteks,
+    perbarui_status_task,
     sesi_user,
     susun_ulang_minggu_ini,
 )
@@ -550,3 +559,53 @@ def test_cek_bentrok_ignores_session_being_moved(db, user_lengkap):
     geser = Interval(dt(7, 15, 30), dt(7, 16))
     assert [b.blocking.kind for b in cek_bentrok(db, user, geser)] == ["task"]
     assert cek_bentrok(db, user, geser, kecuali_id_jadwal=sesi_rabu.id_jadwal) == []
+
+
+# ------------------------------------------------------------
+# STATUS TASK DARI SESI (FR-10)
+# ------------------------------------------------------------
+
+def task_dengan_sesi(db, durasi, sesi, email="argya@example.com"):
+    """Task dengan sesi-sesi (hari, jam_mulai, menit, status) pada minggu 5 Okt."""
+    user, _ = buat_user(db, email)
+    _, (task,) = buat_goal(db, user, [durasi])
+    for hari, jam, menit, status in sesi:
+        mulai = dt(hari, jam)
+        db.add(JadwalTask(task=task, waktu_mulai=mulai, waktu_selesai=mulai + timedelta(minutes=menit),
+                          status=status))
+    db.flush()
+    db.refresh(task)
+    return task
+
+
+@pytest.mark.parametrize("sesi, diharapkan", [
+    # 90 menit dipecah 2 sesi × 45
+    ([(6, 19, 45, JADWAL_TERJADWAL), (7, 19, 45, JADWAL_TERJADWAL)], TASK_TODO),
+    ([(6, 19, 45, JADWAL_SELESAI), (7, 19, 45, JADWAL_TERJADWAL)], TASK_IN_PROGRESS),
+    ([(6, 19, 45, JADWAL_SELESAI), (7, 19, 45, JADWAL_SELESAI)], TASK_DONE),
+    # sesi Selasa terlewat & diganti Kamis: sesi `dilewati` tidak dihitung
+    ([(6, 19, 45, JADWAL_DILEWATI), (7, 19, 45, JADWAL_SELESAI), (8, 19, 45, JADWAL_SELESAI)], TASK_DONE),
+    # terlewat TANPA pengganti (minggu penuh): baru 45 dari 90 menit → belum done
+    ([(6, 19, 45, JADWAL_DILEWATI), (7, 19, 45, JADWAL_SELESAI)], TASK_IN_PROGRESS),
+    # sesi dipendekkan manual: 60 dari 90 menit → user mencentang task sendiri
+    ([(6, 19, 30, JADWAL_SELESAI), (7, 19, 30, JADWAL_SELESAI)], TASK_IN_PROGRESS),
+])
+def test_perbarui_status_task(db, sesi, diharapkan):
+    task = task_dengan_sesi(db, 90, sesi)
+    assert perbarui_status_task(task) == diharapkan
+    assert task.status == diharapkan
+
+
+def test_perbarui_status_task_tanpa_durasi_cukup_satu_sesi_selesai(db):
+    task = task_dengan_sesi(db, None, [(6, 19, 15, JADWAL_SELESAI)])
+    assert perbarui_status_task(task) == TASK_DONE
+
+    task = task_dengan_sesi(db, None, [(6, 19, 15, JADWAL_SELESAI), (7, 19, 15, JADWAL_TERJADWAL)], "lain@example.com")
+    assert perbarui_status_task(task) == TASK_IN_PROGRESS
+
+
+def test_perbarui_status_task_menimpa_status_manual(db):
+    """Status manual (PATCH /tasks) dihitung ulang begitu sesi task itu diubah statusnya."""
+    task = task_dengan_sesi(db, 60, [(6, 19, 60, JADWAL_TERJADWAL)])
+    task.status = TASK_DONE
+    assert perbarui_status_task(task) == TASK_TODO

@@ -31,6 +31,7 @@ from app.services.jadwal_service import (
     cek_bentrok,
     jadwalkan_goal,
     muat_konteks,
+    perbarui_status_task,
     susun_ulang_minggu_ini,
 )
 from app.services.scheduler import Interval, busy_blocks
@@ -52,6 +53,7 @@ def _ke_sesi_read(row: JadwalTask) -> SesiRead:
         waktu_mulai=row.waktu_mulai,
         waktu_selesai=row.waktu_selesai,
         status=row.status,
+        status_task=row.task.status,
     )
 
 
@@ -153,6 +155,9 @@ def ubah_sesi(
     Pemindahan dicek bentrok dengan kegiatan rutin, agenda, dan sesi lain (FR-5); jika bentrok,
     dijawab 409 dengan daftar yang ditabrak dan sesi tidak diubah. Sesi `dilewati` adalah riwayat
     dan tidak bisa diubah.
+
+    Setiap kali status sesi diubah, status task-nya dihitung ulang (`perbarui_status_task`); hasilnya
+    ada di `status_task` respons.
     """
     row = db.scalar(
         select(JadwalTask)
@@ -189,6 +194,7 @@ def ubah_sesi(
         row.waktu_mulai, row.waktu_selesai = waktu.start, waktu.end
     if payload.status is not None:
         row.status = payload.status
+        perbarui_status_task(row.task)
 
     db.commit()
     return _ke_sesi_read(row)

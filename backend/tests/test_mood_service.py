@@ -128,9 +128,8 @@ def test_prasyarat_belum_selesai_di_luar_hari_ini_task_ditunda(db, milestone):
     assert hasil.direkomendasikan == [] and nama(hasil.disarankan_ditunda) == ["Lanjutan"]
 
 
-@pytest.mark.parametrize("cara_selesai", ["task_done", "semua_sesi_selesai"])
-def test_prasyarat_selesai_tidak_menahan(db, milestone, cara_selesai):
-    dasar = task(db, milestone, "Dasar", status=TASK_DONE if cara_selesai == "task_done" else "todo")
+def test_prasyarat_done_tidak_menahan(db, milestone):
+    dasar = task(db, milestone, "Dasar", status=TASK_DONE)
     sesi(db, dasar, dt(2, 9), JADWAL_SELESAI)
     sesi(db, dasar, dt(3, 9), JADWAL_DILEWATI)  # riwayat dilewati tidak dihitung
     lanjut = task(db, milestone, "Lanjutan")
@@ -145,6 +144,19 @@ def test_prasyarat_sebagian_sesi_selesai_masih_menahan(db, milestone):
     dasar = task(db, milestone, "Dasar")
     sesi(db, dasar, dt(2, 9), JADWAL_SELESAI)
     sesi(db, dasar, dt(3, 9))  # sesi kedua belum dikerjakan
+    lanjut = task(db, milestone, "Lanjutan")
+    db.add(TaskDependency(id_task=lanjut.id_task, id_task_prasyarat=dasar.id_task))
+    sesi(db, lanjut, dt(5, 8))
+
+    hasil = rekomendasi_hari_ini(db, milestone.goal.user, mood("HIGH", 6), HARI)
+    assert nama(hasil.disarankan_ditunda) == ["Lanjutan"]
+
+
+def test_prasyarat_hanya_dibaca_dari_status_task(db, milestone):
+    """Sumber kebenaran = task.status (diisi otomatis saat sesi ditandai selesai lewat PATCH /jadwal/sesi).
+    Sesi yang `selesai` tapi task-nya masih `todo` (mis. diubah langsung di DB) tetap menahan."""
+    dasar = task(db, milestone, "Dasar")
+    sesi(db, dasar, dt(2, 9), JADWAL_SELESAI)
     lanjut = task(db, milestone, "Lanjutan")
     db.add(TaskDependency(id_task=lanjut.id_task, id_task_prasyarat=dasar.id_task))
     sesi(db, lanjut, dt(5, 8))
