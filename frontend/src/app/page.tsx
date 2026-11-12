@@ -103,20 +103,32 @@ export default function Home() {
           </div>
         </header>
 
-        {/* WELCOME */}
+        {/* WELCOME + CREATE PLAN BUTTON */}
         <section className="mt-7">
-          <p className="text-xs font-bold tracking-[0.12em] text-[#506851]">
-            DASHBOARD
-          </p>
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-bold tracking-[0.12em] text-[#506851]">
+                DASHBOARD
+              </p>
 
-          <h1 className="mt-3 text-3xl font-medium tracking-tight text-[#30312B] md:text-4xl">
-            Selamat datang kembali!
-          </h1>
+              <h1 className="mt-3 text-3xl font-medium tracking-tight text-[#30312B] md:text-4xl">
+                Selamat datang kembali!
+              </h1>
 
-          <p className="mt-3 text-sm text-[#8B857B]">
-            Yuk, wujudkan targetmu hari ini, satu langkah kecil
-            setiap waktu.
-          </p>
+              <p className="mt-3 text-sm text-[#8B857B]">
+                Yuk, wujudkan targetmu hari ini, satu langkah kecil
+                setiap waktu.
+              </p>
+            </div>
+
+            <Link
+              href="/planning/step-1"
+              className="inline-flex shrink-0 items-center justify-center gap-2 self-start rounded-xl bg-[#826049] px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-[#6D4D38]"
+            >
+              <Plus size={18} />
+              Buat Rencana Baru
+            </Link>
+          </div>
         </section>
 
         {/* STATISTICS */}

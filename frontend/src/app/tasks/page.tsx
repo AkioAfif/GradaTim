@@ -1,14 +1,13 @@
 
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
+import Link from "next/link";
 import {
-  CalendarDays,
-  CheckCircle2,
-  Circle,
+  ArrowLeft,
+  ArrowRight,
   Pencil,
   Plus,
-  Search,
   Trash2,
   X,
 } from "lucide-react";
@@ -17,7 +16,7 @@ import DashboardLayout from "../../components/DashboardLayout";
 import { useTasks, type Task } from "../../context/TaskContext";
 
 type Priority = Task["priority"];
-type Filter = "all" | "active" | "completed";
+type Tab = "Tasks" | "Goals" | "Notes";
 
 type TaskForm = {
   title: string;
@@ -37,26 +36,6 @@ const priorityLabels: Record<Priority, string> = {
   High: "Tinggi",
 };
 
-const priorityStyles: Record<Priority, string> = {
-  Low: "bg-[#E8EFE5] text-[#55724E]",
-  Medium: "bg-[#F5E7D2] text-[#946B3D]",
-  High: "bg-[#F5DDDA] text-[#A64C43]",
-};
-
-function formatDeadline(value: string) {
-  if (!value) return "Tanpa deadline";
-
-  const date = new Date(`${value}T00:00:00`);
-
-  if (Number.isNaN(date.getTime())) return value;
-
-  return date.toLocaleDateString("id-ID", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
-}
-
 export default function TasksPage() {
   const {
     tasks,
@@ -66,41 +45,10 @@ export default function TasksPage() {
     toggleTask,
   } = useTasks();
 
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<Filter>("all");
-  const [form, setForm] = useState<TaskForm>(emptyForm);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>("Tasks");
   const [isFormOpen, setIsFormOpen] = useState(false);
-
-  const completedCount = tasks.filter(
-    (task) => task.completed
-  ).length;
-
-  const activeCount = tasks.length - completedCount;
-
-  const filteredTasks = useMemo(() => {
-    return tasks
-      .filter((task) =>
-        task.title.toLowerCase().includes(
-          search.trim().toLowerCase()
-        )
-      )
-      .filter((task) => {
-        if (filter === "active") return !task.completed;
-        if (filter === "completed") return task.completed;
-        return true;
-      })
-      .sort((a, b) => {
-        if (a.completed !== b.completed) {
-          return Number(a.completed) - Number(b.completed);
-        }
-
-        if (!a.deadline) return 1;
-        if (!b.deadline) return -1;
-
-        return a.deadline.localeCompare(b.deadline);
-      });
-  }, [tasks, search, filter]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<TaskForm>(emptyForm);
 
   function openAddForm() {
     setEditingId(null);
@@ -160,190 +108,211 @@ export default function TasksPage() {
 
   return (
     <DashboardLayout>
-      <div className="mx-auto max-w-6xl">
-        {/* HEADER */}
-        <header className="flex flex-wrap items-center justify-between gap-5">
-          <div>
-            <p className="text-sm text-[#8A7A69]">
-              Personal Productivity Planner
-            </p>
+      <div className="mx-auto max-w-5xl">
+        {/* TOP BAR */}
+        <header className="flex items-center justify-between border-b border-[#E9E0D4] pb-5">
+          <p className="text-xs text-[#8B857B]">
+            Task Management
+          </p>
 
-            <h1 className="mt-2 font-serif text-4xl font-semibold">
-              Manajemen Tugas
-            </h1>
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#D7B99B] text-sm font-medium text-white">
+            A
+          </div>
+        </header>
 
-            <p className="mt-3 text-sm text-[#817769]">
-              Atur prioritas, pantau deadline, dan selesaikan
-              tugasmu satu per satu.
-            </p>
+        {/* PAGE HEADING */}
+        <section className="mt-7">
+          <p className="text-xs font-bold tracking-[0.12em] text-[#506851]">
+            LANGKAH 6 DARI 7
+          </p>
+
+          <h1 className="mt-3 text-3xl font-medium tracking-tight md:text-4xl">
+            Kelola Tugas &amp; Target
+          </h1>
+
+          <p className="mt-3 text-sm text-[#8B857B]">
+            Prioritaskan aktivitas yang mendukung tujuanmu.
+          </p>
+        </section>
+
+        {/* TABS AND ADD BUTTON */}
+        <section className="mt-7 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex gap-3">
+            {(["Tasks", "Goals", "Notes"] as Tab[]).map(
+              (tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setActiveTab(tab)}
+                  className={`rounded-full px-5 py-2.5 text-sm transition ${
+                    activeTab === tab
+                      ? "bg-[#F0C4A4] text-[#45382E]"
+                      : "bg-[#ECE9E1] text-[#57564F] hover:bg-[#E2DDD3]"
+                  }`}
+                >
+                  {tab}
+                </button>
+              )
+            )}
           </div>
 
           <button
             type="button"
             onClick={openAddForm}
-            className="flex items-center gap-2 rounded-xl bg-[#826049] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#6D4D38]"
+            className="flex items-center gap-2 rounded-lg bg-[#826049] px-5 py-3 text-sm font-medium text-white hover:bg-[#6D4D38]"
           >
-            <Plus size={18} />
+            <Plus size={16} />
             Tambah Tugas
           </button>
-        </header>
-
-        {/* STATISTICS */}
-        <section className="mt-9 grid gap-4 sm:grid-cols-3">
-          <StatCard
-            label="Total Tugas"
-            value={tasks.length}
-            icon={<CalendarDays size={23} />}
-          />
-
-          <StatCard
-            label="Belum Selesai"
-            value={activeCount}
-            icon={<Circle size={23} />}
-          />
-
-          <StatCard
-            label="Selesai"
-            value={completedCount}
-            icon={<CheckCircle2 size={23} />}
-          />
         </section>
 
-        {/* TASK LIST */}
-        <section className="mt-8 rounded-2xl border border-[#E9DED0] bg-white p-5 shadow-sm sm:p-7">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <h2 className="font-serif text-2xl font-semibold">
-              Daftar Tugas
+        {/* CONTENT */}
+        {activeTab === "Tasks" ? (
+          <section className="mt-3 overflow-hidden rounded-xl border border-[#E5D9C9] bg-white">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[680px] border-collapse text-left text-sm">
+                <thead className="bg-[#F1EADF]">
+                  <tr>
+                    <th className="px-4 py-4 font-semibold">
+                      Task
+                    </th>
+                    <th className="px-4 py-4 font-semibold">
+                      Est. Time
+                    </th>
+                    <th className="px-4 py-4 font-semibold">
+                      Difficulty
+                    </th>
+                    <th className="px-4 py-4 font-semibold">
+                      Energy
+                    </th>
+                    <th className="px-4 py-4 font-semibold">
+                      Status
+                    </th>
+                    <th className="px-4 py-4 text-right font-semibold">
+                      Aksi
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-[#EEE6DA]">
+                  {tasks.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="px-4 py-12 text-center text-[#8B857B]"
+                      >
+                        Belum ada tugas. Klik Tambah Tugas
+                        untuk membuat tugas pertamamu.
+                      </td>
+                    </tr>
+                  ) : (
+                    tasks.map((task) => (
+                      <tr
+                        key={task.id}
+                        className="hover:bg-[#FFFAF3]"
+                      >
+                        <td className="px-4 py-4">
+                          <div className="font-medium">
+                            {task.title}
+                          </div>
+
+                          <div className="mt-1 text-xs text-[#8B857B]">
+                            Prioritas:{" "}
+                            {priorityLabels[task.priority] ??
+                              "Sedang"}
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-4 text-[#8B857B]">
+                          —
+                        </td>
+
+                        <td className="px-4 py-4 text-[#8B857B]">
+                          —
+                        </td>
+
+                        <td className="px-4 py-4 text-[#8B857B]">
+                          —
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <button
+                            type="button"
+                            onClick={() => toggleTask(task.id)}
+                            title="Klik untuk mengubah status"
+                            className={`rounded-md px-3 py-1.5 text-xs font-medium ${
+                              task.completed
+                                ? "bg-[#E2EBDD] text-[#506851]"
+                                : "bg-[#F0E9DF] text-[#826049]"
+                            }`}
+                          >
+                            {task.completed ? "Done" : "To Do"}
+                          </button>
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openEditForm(task)}
+                              title="Edit tugas"
+                              aria-label={`Edit ${task.title}`}
+                              className="rounded-lg p-2 text-[#64765C] hover:bg-[#EEF1EB]"
+                            >
+                              <Pencil size={17} />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(task)}
+                              title="Hapus tugas"
+                              aria-label={`Hapus ${task.title}`}
+                              className="rounded-lg p-2 text-[#A64C43] hover:bg-[#F9E9E6]"
+                            >
+                              <Trash2 size={17} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : (
+          <section className="mt-4 rounded-xl border border-[#E5D9C9] bg-[#F7EEE3] p-8 text-center">
+            <h2 className="text-lg font-semibold">
+              {activeTab}
             </h2>
 
-            <div className="flex items-center gap-2 rounded-xl border border-[#E8DED1] bg-[#FAF6EE] px-4 py-2.5">
-              <Search size={18} className="text-[#8A7A69]" />
+            <p className="mt-3 text-sm text-[#8B857B]">
+              Fitur {activeTab} akan diimplementasikan
+              pada tahap berikutnya.
+            </p>
+          </section>
+        )}
 
-              <input
-                type="search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Cari tugas..."
-                aria-label="Cari tugas"
-                className="w-44 bg-transparent text-sm outline-none sm:w-56"
-              />
-            </div>
-          </div>
+        
+{/* NAVIGATION */}
+<div className="mt-6 flex items-center justify-between gap-4">
+  <Link
+    href="/planning/step-5"
+    className="flex items-center gap-2 rounded-lg border border-[#DDD2C3] bg-[#ECE9E1] px-5 py-3 text-sm font-medium hover:bg-[#E2DDD3]"
+  >
+    <ArrowLeft size={16} />
+    Kembali
+  </Link>
 
-          {/* FILTER */}
-          <div className="mt-6 flex flex-wrap gap-2">
-            {(
-              [
-                { value: "all", label: "Semua" },
-                { value: "active", label: "Belum Selesai" },
-                { value: "completed", label: "Selesai" },
-              ] as const
-            ).map((item) => (
-              <button
-                key={item.value}
-                type="button"
-                onClick={() => setFilter(item.value)}
-                aria-pressed={filter === item.value}
-                className={`rounded-full px-4 py-2 text-sm font-medium transition ${
-                  filter === item.value
-                    ? "bg-[#64765C] text-white"
-                    : "bg-[#F2EEE6] text-[#625D53] hover:bg-[#E7E1D5]"
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
+  <Link
+    href="/planning/step-7"
+    className="flex items-center gap-2 rounded-lg bg-[#826049] px-5 py-3 text-sm font-medium text-white hover:bg-[#6D4D38]"
+  >
+    Lanjut
+    <ArrowRight size={16} />
+  </Link>
+</div>
 
-          {/* TASK ITEMS */}
-          <div className="mt-6 space-y-3">
-            {filteredTasks.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-[#DDD2C3] bg-[#FAF6EE] px-5 py-12 text-center">
-                <p className="font-medium text-[#625D53]">
-                  Belum ada tugas yang cocok.
-                </p>
-                <p className="mt-2 text-sm text-[#8A7A69]">
-                  Coba ubah pencarian atau tambahkan tugas baru.
-                </p>
-              </div>
-            ) : (
-              filteredTasks.map((task) => (
-                <article
-                  key={task.id}
-                  className="flex flex-wrap items-center gap-4 rounded-xl border border-[#E9DED0] bg-[#FFF9F0] p-4 transition hover:border-[#C7B7A5]"
-                >
-                  <input
-                    type="checkbox"
-                    checked={task.completed}
-                    onChange={() => toggleTask(task.id)}
-                    aria-label={`Tandai ${task.title} ${
-                      task.completed
-                        ? "belum selesai"
-                        : "selesai"
-                    }`}
-                    className="h-5 w-5 shrink-0 accent-[#64765C]"
-                  />
-
-                  <div className="min-w-0 flex-1">
-                    <h3
-                      className={`break-words font-medium ${
-                        task.completed
-                          ? "text-[#A49A8C] line-through"
-                          : "text-[#30312B]"
-                      }`}
-                    >
-                      {task.title}
-                    </h3>
-
-                    <div className="mt-2 flex flex-wrap items-center gap-3">
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-medium ${
-                          priorityStyles[task.priority] ??
-                          priorityStyles.Medium
-                        }`}
-                      >
-                        {priorityLabels[task.priority] ??
-                          "Sedang"}
-                      </span>
-
-                      <span className="flex items-center gap-1.5 text-xs text-[#817769]">
-                        <CalendarDays size={14} />
-                        {formatDeadline(task.deadline)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="ml-auto flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => openEditForm(task)}
-                      aria-label={`Edit ${task.title}`}
-                      title="Edit tugas"
-                      className="rounded-lg border border-[#E5D9C9] bg-white p-2.5 text-[#64765C] hover:bg-[#EEF1EB]"
-                    >
-                      <Pencil size={17} />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(task)}
-                      aria-label={`Hapus ${task.title}`}
-                      title="Hapus tugas"
-                      className="rounded-lg border border-[#E5D9C9] bg-white p-2.5 text-[#A64C43] hover:bg-[#F9E9E6]"
-                    >
-                      <Trash2 size={17} />
-                    </button>
-                  </div>
-                </article>
-              ))
-            )}
-          </div>
-
-          <p className="mt-5 text-xs text-[#9A8F81]">
-            Menampilkan {filteredTasks.length} dari {tasks.length} tugas.
-          </p>
-        </section>
-      </div>
 
       {/* ADD / EDIT MODAL */}
       {isFormOpen && (
@@ -354,10 +323,10 @@ export default function TasksPage() {
             aria-labelledby="task-form-title"
             className="w-full max-w-lg rounded-2xl bg-[#FFFCF7] p-6 shadow-xl sm:p-8"
           >
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center justify-between">
               <h2
                 id="task-form-title"
-                className="font-serif text-2xl font-semibold"
+                className="text-2xl font-semibold"
               >
                 {editingId ? "Edit Tugas" : "Tambah Tugas"}
               </h2>
@@ -366,7 +335,7 @@ export default function TasksPage() {
                 type="button"
                 onClick={closeForm}
                 aria-label="Tutup formulir"
-                className="rounded-lg p-2 text-[#817769] hover:bg-[#F2EEE6]"
+                className="rounded-lg p-2 hover:bg-[#F2EEE6]"
               >
                 <X size={20} />
               </button>
@@ -392,7 +361,7 @@ export default function TasksPage() {
                       title: event.target.value,
                     })
                   }
-                  placeholder="Contoh: Belajar materi statistika"
+                  placeholder="Masukkan nama tugas"
                   className="w-full rounded-xl border border-[#E5D9C9] bg-white px-4 py-3 text-sm outline-none focus:border-[#64765C]"
                 />
               </div>
@@ -448,47 +417,25 @@ export default function TasksPage() {
                 <button
                   type="button"
                   onClick={closeForm}
-                  className="rounded-xl border border-[#DDD2C3] px-5 py-3 text-sm font-medium text-[#625D53] hover:bg-[#F2EEE6]"
+                  className="rounded-lg border border-[#DDD2C3] px-5 py-3 text-sm"
                 >
                   Batal
                 </button>
 
                 <button
                   type="submit"
-                  className="rounded-xl bg-[#826049] px-6 py-3 text-sm font-semibold text-white hover:bg-[#6D4D38]"
+                  className="rounded-lg bg-[#826049] px-5 py-3 text-sm font-medium text-white"
                 >
-                  {editingId ? "Simpan Perubahan" : "Simpan Tugas"}
+                  {editingId
+                    ? "Simpan Perubahan"
+                    : "Simpan Tugas"}
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
+      </div>
     </DashboardLayout>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  icon,
-}: {
-  label: string;
-  value: number;
-  icon: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between rounded-2xl border border-[#E9DED0] bg-white p-6 shadow-sm">
-      <div>
-        <p className="text-sm text-[#817769]">{label}</p>
-        <p className="mt-2 text-3xl font-bold text-[#30312B]">
-          {value}
-        </p>
-      </div>
-
-      <div className="rounded-xl bg-[#E8EFE5] p-3 text-[#64765C]">
-        {icon}
-      </div>
-    </div>
   );
 }
