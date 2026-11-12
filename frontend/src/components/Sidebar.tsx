@@ -9,7 +9,6 @@ import {
   CalendarDays,
   ChartNoAxesColumn,
   Settings,
-  Leaf,
   LogOut,
 } from "lucide-react";
 
@@ -25,13 +24,14 @@ export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="flex min-h-screen w-64 flex-col border-r border-[#E8DED1] bg-[#F6F0E6] px-5 py-7">
-      <div className="mb-12 flex items-center gap-2">
-        <Leaf className="text-[#64765C]" size={25} />
-        <h1 className="text-2xl font-bold text-[#2F3029]">
-          GradaTim
-        </h1>
-      </div>
+    <aside className="flex w-44 shrink-0 flex-col border-r border-[#E9E0D4] bg-[#F4F0E7] px-4 py-6 md:min-h-screen">
+      <Link
+        href="/"
+        className="mb-10 flex items-center gap-1 text-xl font-bold tracking-tight text-[#506851]"
+      >
+        <span className="text-2xl">✦</span>
+        GradaTim
+      </Link>
 
       <nav className="flex flex-col gap-2">
         {menuItems.map((item) => {
@@ -42,13 +42,13 @@ export default function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition ${
+              className={`flex items-center gap-3 rounded-lg px-3 py-3 text-xs transition ${
                 active
-                  ? "bg-[#64765C] text-white"
-                  : "text-[#4D5148] hover:bg-[#E8E4D8]"
+                  ? "bg-[#506851] font-medium text-white"
+                  : "text-[#64675E] hover:bg-[#EAE7DD]"
               }`}
             >
-              <Icon size={19} />
+              <Icon size={15} />
               {item.label}
             </Link>
           );
@@ -58,9 +58,11 @@ export default function Sidebar() {
       <div className="mt-auto pt-10">
         <button
           type="button"
-          className="flex w-full items-center gap-3 rounded-xl bg-[#826049] px-4 py-3 text-sm text-white"
+          disabled
+          title="Logout tersedia setelah integrasi autentikasi"
+          className="flex w-full cursor-not-allowed items-center gap-2 rounded-lg bg-[#E5E8DC] px-3 py-2.5 text-xs text-[#506851] opacity-75"
         >
-          <LogOut size={18} />
+          <LogOut size={15} />
           Keluar
         </button>
       </div>
