@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.core.config import settings
 from app.core.status import (
+    JADWAL_DILEWATI,
     JADWAL_SELESAI,
     JADWAL_TERJADWAL,
     JADWAL_TIDAK_AKTIF,
@@ -277,6 +278,7 @@ def jadwalkan_goal(db: DbSession, user: User, goal: Goal, sekarang: datetime) ->
     ]
     db.add_all(sesi_baru)
     db.flush()
+    isi_fitur(db, user, sesi_baru, sekarang)
     return HasilPenjadwalan(sesi_baru=sesi_baru, tidak_muat=hasil.unscheduled)
 
 
@@ -353,6 +355,7 @@ def susun_ulang_minggu_ini(
     ]
     db.add_all(sesi_baru)
     db.flush()
+    isi_fitur(db, user, sesi_baru, sekarang)
     return HasilSusunUlang(
         dipindah=hasil.rescheduled,
         tidak_muat=hasil.unscheduled,
@@ -425,3 +428,67 @@ def hapus_sesi_pengganti(task: Task, sekarang: datetime) -> list[JadwalTask]:
     for s in pengganti:
         task.jadwal.remove(s)  # cascade delete-orphan → baris dihapus saat flush
     return pengganti
+
+
+# ============================================================
+# SNAPSHOT FITUR MODEL PERSONALISASI (docs/AI.md §2)
+# ============================================================
+
+VERSI_FITUR = 1
+RIWAYAT_HARI = 7
+
+
+def isi_fitur(db: DbSession, user: User, sesi: list[JadwalTask], sekarang: datetime) -> None:
+    """Isi `jadwal_task.fitur` untuk sesi yang baru dibuat atau baru dipindah (panggil setelah flush).
+
+    Semua fitur hanya memakai informasi yang sudah diketahui pada `sekarang` (saat penjadwalan), agar
+    tidak ada kebocoran informasi masa depan. Mood TIDAK di sini — mood baru diisi di hari-H dan
+    digabungkan saat ekspor dataset.
+
+    Isi snapshot (VERSI_FITUR = 1):
+    - versi, dihitung_pada
+    - waktu: jam_mulai (desimal, 19.5 = 19:30), hari (0 = Senin), durasi_menit, jam_sebelum_mulai
+    - task: effort, impact (low/medium/high/null), durasi_estimasi_task, sisa_hari_deadline
+      (deadline task, atau deadline goal; null bila tidak ada)
+    - hari itu: urutan_sesi_hari_itu (1 = sesi pertama), jumlah_sesi_hari_itu — dari sesi aktif user
+    - riwayat RIWAYAT_HARI hari: riwayat_selesai, riwayat_dilewati (hanya sesi TERKONFIRMASI yang sudah
+      berakhir sebelum `sekarang`), tingkat_selesai_riwayat (null bila belum ada riwayat)
+    """
+    if not sesi:
+        return
+    riwayat = [
+        r for r in sesi_user(db, user, sekarang - timedelta(days=RIWAYAT_HARI), sekarang,
+                             kecuali=(JADWAL_TERJADWAL, JADWAL_TIDAK_DIKETAHUI))
+        if r.waktu_selesai <= sekarang
+    ]
+    selesai = sum(r.status == JADWAL_SELESAI for r in riwayat)
+    dilewati = sum(r.status == JADWAL_DILEWATI for r in riwayat)
+
+    hari_pertama = min(r.waktu_mulai for r in sesi).date()
+    hari_terakhir = max(r.waktu_mulai for r in sesi).date()
+    per_hari: dict[date, list[JadwalTask]] = defaultdict(list)
+    for r in sesi_user(db, user, datetime.combine(hari_pertama, time.min),
+                       datetime.combine(hari_terakhir + timedelta(days=1), time.min)):
+        per_hari[r.waktu_mulai.date()].append(r)
+
+    for r in sesi:
+        task = r.task
+        deadline = task.deadline or task.milestone.goal.deadline
+        hari_itu = sorted(per_hari[r.waktu_mulai.date()], key=lambda x: (x.waktu_mulai, x.id_jadwal))
+        r.fitur = {  # dict baru (bukan diubah di tempat) agar perubahan kolom JSON terdeteksi
+            "versi": VERSI_FITUR,
+            "dihitung_pada": sekarang.isoformat(),
+            "jam_mulai": r.waktu_mulai.hour + r.waktu_mulai.minute / 60,
+            "hari": r.waktu_mulai.weekday(),
+            "durasi_menit": int((r.waktu_selesai - r.waktu_mulai).total_seconds() // 60),
+            "jam_sebelum_mulai": round((r.waktu_mulai - sekarang).total_seconds() / 3600, 2),
+            "effort": task.tingkat_effort,
+            "impact": task.tingkat_impact,
+            "durasi_estimasi_task": task.durasi_estimasi,
+            "sisa_hari_deadline": (deadline.date() - r.waktu_mulai.date()).days if deadline else None,
+            "urutan_sesi_hari_itu": next((i for i, x in enumerate(hari_itu, 1) if x is r), None),
+            "jumlah_sesi_hari_itu": len(hari_itu),
+            "riwayat_selesai": selesai,
+            "riwayat_dilewati": dilewati,
+            "tingkat_selesai_riwayat": round(selesai / (selesai + dilewati), 4) if selesai + dilewati else None,
+        }

@@ -30,6 +30,7 @@ from app.services.jadwal_service import (
     awal_minggu,
     cek_bentrok,
     hapus_sesi_pengganti,
+    isi_fitur,
     jadwalkan_goal,
     muat_konteks,
     perbarui_status_task,
@@ -216,6 +217,8 @@ def ubah_sesi(
             )
         row.waktu_mulai, row.waktu_selesai = waktu.start, waktu.end
         row.dipindah = True
+        db.flush()
+        isi_fitur(db, current_user, [row], sekarang)  # snapshot lama tidak cocok lagi dengan slot baru
     if payload.status is not None:
         row.status = payload.status
         if terlewat and payload.status == JADWAL_SELESAI:
