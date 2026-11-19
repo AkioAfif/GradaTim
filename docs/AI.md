@@ -143,8 +143,19 @@ Model hanya melihat hasil di slot yang dipilih penjadwal. Penjadwal saat ini *ea
 ke slot kosong paling awal (setelah kegiatan rutin dan waktu sekarang), sehingga sebaran jam mulai di
 data sempit dan slot yang jarang dipakai (mis. malam hari) hanya bisa ditebak model, bukan dipelajari.
 
-Selama dogfooding, **sebagian sesi (mis. 30%) ditempatkan di slot acak yang valid** di dalam jam aktif,
-dengan batas `daily_cap` tetap berlaku. Sesi eksplorasi ditandai agar bisa dianalisis terpisah.
+Selama dogfooding, **sekitar 20% task ditempatkan di slot acak yang valid** (`EKSPLORASI_RASIO=0.2` di
+`.env`; default 0 = mati untuk tes dan produksi). Peserta diberi tahu secara umum di awal bahwa "sebagian
+sesi ditempatkan acak untuk riset", tanpa diberi tahu sesi mana. 30% dinilai terlalu mengganggu: user yang
+biasa kerja malam bisa mendapat banyak sesi pagi lalu berhenti memakai aplikasi.
+
+Aturan eksplorasi (`scheduler._plan_random`):
+- Yang diacak hanya **posisi mulai** (seragam di antara semua posisi valid, kelipatan 15 menit). Batasan
+  lain tetap: setelah prasyarat selesai, tidak sebelum awal minggu task, di dalam slot luang sampai akhir
+  minggu/deadline, dan `daily_cap` tetap berlaku.
+- Task yang punya penerus di batch yang sama tidak diacak, agar penerusnya tidak terdorong sampai tidak muat.
+- Task yang tidak muat utuh di satu posisi acak dijadwalkan cara biasa dan tidak ditandai eksplorasi.
+- Hanya saat penjadwalan goal; susun ulang tidak mengacak.
+- Sesi eksplorasi ditandai `jadwal_task.eksplorasi = true` dan tetap ikut dataset (tidak dipisah).
 
 ### Evaluasi
 
@@ -201,7 +212,8 @@ keterbatasan, tetapi cukup untuk model sederhana dan perbandingan dengan baselin
       konfirmasi eksplisit per sesi + status "tidak diketahui" (lihat tabel di §2).
 - [x] **Snapshot fitur.** Diputuskan: fitur waktu/task/riwayat dibekukan saat penjadwalan; mood digabung
       dari kuesioner hari-H bila diisi sebelum sesi mulai (§2 "Kapan fitur dicatat").
-- [ ] **Eksplorasi slot acak.** Berapa persen sesi yang diacak, dan apakah user diberi tahu?
+- [x] **Eksplorasi slot acak.** Diputuskan: ±20% task, peserta diberi tahu secara umum (§2 "Bias seleksi
+      dan eksplorasi").
 - [ ] **Jadwal dogfooding.** Butuh frontend yang tersambung ke backend dan minimal ±2 minggu pemakaian
       sebelum presentasi. Pencatatan data (konfirmasi, snapshot, eksplorasi) harus jalan **sebelum**
       dogfooding dimulai; model bisa dikerjakan sambil menunggu data.
