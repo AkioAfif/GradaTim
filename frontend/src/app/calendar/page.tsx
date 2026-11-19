@@ -2,21 +2,21 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
-  CalendarDays,
   ChevronLeft,
   ChevronRight,
-  CheckCircle2,
-  Clock3,
-  ListTodo,
+  CalendarDays,
 } from "lucide-react";
 
 import DashboardLayout from "../../components/DashboardLayout";
 import { useTasks } from "../../context/TaskContext";
 
-const weekDays = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+type ViewMode = "month" | "week";
 
-function toDateKey(date: Date) {
+const weekdays = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
+
+function toDateKey(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
@@ -24,9 +24,20 @@ function toDateKey(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function formatDate(date: Date) {
+function parseDateKey(key: string): Date {
+  const [year, month, day] = key.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function getMonday(date: Date): Date {
+  const result = new Date(date);
+  const offset = (result.getDay() + 6) % 7;
+  result.setDate(result.getDate() - offset);
+  return result;
+}
+
+function formatDate(date: Date): string {
   return date.toLocaleDateString("id-ID", {
-    weekday: "long",
     day: "numeric",
     month: "long",
     year: "numeric",
@@ -40,332 +51,336 @@ export default function CalendarPage() {
     () => new Date()
   );
 
-  const [currentMonth, setCurrentMonth] = useState(
+  const [displayDate, setDisplayDate] = useState(
     () => new Date()
   );
 
-  const year = currentMonth.getFullYear();
-  const month = currentMonth.getMonth();
+  const [viewMode, setViewMode] = useState<ViewMode>("month");
 
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-  const calendarCells: (number | null)[] = [
-    ...Array.from({ length: firstDay }, () => null),
-    ...Array.from(
-      { length: daysInMonth },
-      (_, index) => index + 1
-    ),
-  ];
-
-  const selectedKey = toDateKey(selectedDate);
   const todayKey = toDateKey(new Date());
+  const selectedKey = toDateKey(selectedDate);
 
   const selectedTasks = tasks.filter(
     (task) => task.deadline === selectedKey
   );
 
-  const tasksWithDeadline = tasks.filter(
-    (task) => Boolean(task.deadline)
-  );
+  const sprintStart = getMonday(selectedDate);
+  const sprintEnd = new Date(sprintStart);
+  sprintEnd.setDate(sprintEnd.getDate() + 13);
 
-  const completedCount = tasksWithDeadline.filter(
-    (task) => task.completed
-  ).length;
+  const sprintTasks = tasks.filter((task) => {
+    if (!task.deadline) return false;
 
-  function changeMonth(offset: number) {
-    const nextMonth = new Date(year, month + offset, 1);
+    const deadline = parseDateKey(task.deadline);
 
-    setCurrentMonth(nextMonth);
-    setSelectedDate(nextMonth);
+    return deadline >= sprintStart && deadline <= sprintEnd;
+  });
+
+  function changePeriod(direction: number) {
+    const next = new Date(displayDate);
+
+    if (viewMode === "month") {
+      next.setDate(1);
+      next.setMonth(next.getMonth() + direction);
+    } else {
+      next.setDate(next.getDate() + direction * 7);
+    }
+
+    setDisplayDate(next);
   }
 
-  function selectDay(day: number) {
-    setSelectedDate(new Date(year, month, day));
+  function selectDate(date: Date) {
+    setSelectedDate(date);
+    setDisplayDate(date);
   }
 
-  function goToToday() {
-    const today = new Date();
+  function renderMonthDays() {
+    const year = displayDate.getFullYear();
+    const month = displayDate.getMonth();
 
-    setCurrentMonth(today);
-    setSelectedDate(today);
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+
+    const offset = (firstDay.getDay() + 6) % 7;
+    const totalDays = lastDay.getDate();
+
+    const cells: (Date | null)[] = [];
+
+    for (let index = 0; index < offset; index++) {
+      cells.push(null);
+    }
+
+    for (let day = 1; day <= totalDays; day++) {
+      cells.push(new Date(year, month, day));
+    }
+
+    while (cells.length % 7 !== 0) {
+      cells.push(null);
+    }
+
+    return cells;
   }
+
+  function renderWeekDays() {
+    const monday = getMonday(displayDate);
+
+    return Array.from({ length: 7 }, (_, index) => {
+      const day = new Date(monday);
+      day.setDate(monday.getDate() + index);
+      return day;
+    });
+  }
+
+  const visibleDays =
+    viewMode === "month" ? renderMonthDays() : renderWeekDays();
+
+  const periodTitle =
+    viewMode === "month"
+      ? displayDate.toLocaleDateString("id-ID", {
+          month: "long",
+          year: "numeric",
+        })
+      : `${formatDate(getMonday(displayDate))} - ${formatDate(
+          (() => {
+            const sunday = getMonday(displayDate);
+            sunday.setDate(sunday.getDate() + 6);
+            return sunday;
+          })()
+        )}`;
 
   return (
     <DashboardLayout>
-      <div className="mx-auto max-w-6xl">
+      <div className="mx-auto max-w-5xl">
         {/* HEADER */}
-        <header className="flex flex-wrap items-center justify-between gap-5">
-          <div>
-            <p className="text-sm text-[#8A7A69]">
-              Personal Productivity Planner
-            </p>
+        <header className="flex items-center justify-between border-b border-[#E9E0D4] pb-5">
+          <p className="text-xs text-[#8B857B]">
+            Kalender
+          </p>
 
-            <h1 className="mt-2 font-serif text-4xl font-semibold">
-              Kalender
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#D7B99B] text-sm font-medium text-white">
+            A
+          </div>
+        </header>
+
+        {/* TITLE */}
+        <section className="mt-7 flex flex-wrap items-start justify-between gap-5">
+          <div>
+            <h1 className="text-3xl font-medium tracking-tight md:text-4xl">
+              Kalender Belajar
             </h1>
 
-            <p className="mt-3 text-sm text-[#817769]">
-              Pantau deadline dan atur aktivitasmu
-              dengan lebih terencana.
+            <p className="mt-3 text-sm text-[#8B857B]">
+              Pantau jadwal dan targetmu dalam satu tampilan.
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={goToToday}
-            className="rounded-xl bg-[#826049] px-5 py-3 text-sm font-semibold text-white hover:bg-[#6D4D38]"
-          >
-            Hari Ini
-          </button>
-        </header>
-
-        {/* SUMMARY */}
-        <section className="mt-9 grid gap-4 sm:grid-cols-3">
-          <SummaryCard
-            label="Tugas dengan Deadline"
-            value={tasksWithDeadline.length}
-            icon={<CalendarDays size={22} />}
-          />
-
-          <SummaryCard
-            label="Belum Selesai"
-            value={tasksWithDeadline.length - completedCount}
-            icon={<Clock3 size={22} />}
-          />
-
-          <SummaryCard
-            label="Selesai"
-            value={completedCount}
-            icon={<CheckCircle2 size={22} />}
-          />
+          <div className="flex items-center gap-3">
+            {(["month", "week"] as ViewMode[]).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setViewMode(mode)}
+                className={`rounded-full px-5 py-2.5 text-sm transition ${
+                  viewMode === mode
+                    ? "bg-[#F0C4A4] text-[#45382E]"
+                    : "bg-[#ECE9E1] text-[#57564F] hover:bg-[#E2DDD3]"
+                }`}
+              >
+                {mode === "month" ? "Month" : "Week"}
+              </button>
+            ))}
+          </div>
         </section>
 
-        <section className="mt-8 grid gap-6 xl:grid-cols-[1.5fr_1fr]">
-          {/* CALENDAR */}
-          <div className="rounded-2xl border border-[#E9DED0] bg-white p-5 shadow-sm sm:p-7">
-            <div className="mb-7 flex items-center justify-between gap-3">
-              <h2 className="font-serif text-2xl font-semibold capitalize">
-                {currentMonth.toLocaleDateString("id-ID", {
-                  month: "long",
-                  year: "numeric",
-                })}
+        {/* CALENDAR + SPRINT */}
+        <section className="mt-7 grid items-start gap-4 lg:grid-cols-[1.2fr_1fr]">
+          {/* CALENDAR CARD */}
+          <div className="rounded-xl border border-[#E7DBCC] bg-[#FFFCF7] p-5">
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold capitalize">
+                {periodTitle}
               </h2>
 
               <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => changeMonth(-1)}
-                  aria-label="Bulan sebelumnya"
-                  className="rounded-lg border border-[#E5D9C9] p-2 text-[#64765C] hover:bg-[#EEF1EB]"
+                  onClick={() => changePeriod(-1)}
+                  aria-label="Periode sebelumnya"
+                  className="rounded-lg p-2 hover:bg-[#F3EADD]"
                 >
-                  <ChevronLeft size={20} />
+                  <ChevronLeft size={18} />
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => changeMonth(1)}
-                  aria-label="Bulan berikutnya"
-                  className="rounded-lg border border-[#E5D9C9] p-2 text-[#64765C] hover:bg-[#EEF1EB]"
+                  onClick={() => changePeriod(1)}
+                  aria-label="Periode berikutnya"
+                  className="rounded-lg p-2 hover:bg-[#F3EADD]"
                 >
-                  <ChevronRight size={20} />
+                  <ChevronRight size={18} />
                 </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-7 gap-2">
-              {weekDays.map((day) => (
+            <div className="grid grid-cols-7 gap-1">
+              {weekdays.map((day) => (
                 <div
                   key={day}
-                  className="py-2 text-center text-xs font-semibold text-[#817769]"
+                  className="rounded-md border border-[#E9E0D4] bg-white py-3 text-center text-xs font-medium"
                 >
                   {day}
                 </div>
               ))}
 
-              {calendarCells.map((day, index) => {
-                if (day === null) {
+              {visibleDays.map((date, index) => {
+                if (!date) {
                   return (
                     <div
                       key={`empty-${index}`}
-                      className="min-h-16"
+                      className="min-h-12"
                     />
                   );
                 }
 
-                const date = new Date(year, month, day);
-                const dateKey = toDateKey(date);
+                const key = toDateKey(date);
+                const isSelected = key === selectedKey;
+                const isToday = key === todayKey;
 
-                const dayTasks = tasks.filter(
-                  (task) => task.deadline === dateKey
-                );
-
-                const isSelected = dateKey === selectedKey;
-                const isToday = dateKey === todayKey;
+                const taskCount = tasks.filter(
+                  (task) => task.deadline === key
+                ).length;
 
                 return (
                   <button
-                    key={dateKey}
+                    key={key}
                     type="button"
-                    onClick={() => selectDay(day)}
-                    aria-label={`${formatDate(date)}, ${dayTasks.length} tugas`}
-                    aria-pressed={isSelected}
-                    className={`flex min-h-16 flex-col items-center justify-center gap-2 rounded-xl border p-2 transition ${
+                    onClick={() => selectDate(date)}
+                    title={`${formatDate(date)} - ${taskCount} tugas`}
+                    className={`relative flex min-h-12 flex-col items-center justify-center rounded-md border text-sm transition ${
                       isSelected
-                        ? "border-[#64765C] bg-[#E8EFE5]"
+                        ? "border-[#826049] bg-[#826049] text-white"
                         : isToday
-                          ? "border-[#D6B99B] bg-[#FFF5E8]"
-                          : "border-transparent hover:border-[#E5D9C9] hover:bg-[#FAF6EE]"
+                        ? "border-[#82947B] bg-[#EFF2EB] text-[#506851]"
+                        : "border-[#E9E0D4] bg-white hover:bg-[#F3EADD]"
                     }`}
                   >
-                    <span
-                      className={`text-sm font-semibold ${
-                        isSelected
-                          ? "text-[#55724E]"
-                          : "text-[#45453D]"
-                      }`}
-                    >
-                      {day}
-                    </span>
+                    <span>{date.getDate()}</span>
 
-                    {dayTasks.length > 0 ? (
-                      <span className="flex items-center gap-1">
-                        {dayTasks.slice(0, 3).map((task) => (
-                          <span
-                            key={task.id}
-                            className={`h-1.5 w-1.5 rounded-full ${
-                              task.completed
-                                ? "bg-[#8D9B80]"
-                                : "bg-[#C38D64]"
-                            }`}
-                          />
-                        ))}
-                      </span>
-                    ) : (
-                      <span className="h-1.5" />
+                    {taskCount > 0 && (
+                      <span
+                        className={`mt-1 h-1.5 w-1.5 rounded-full ${
+                          isSelected
+                            ? "bg-white"
+                            : "bg-[#82947B]"
+                        }`}
+                      />
                     )}
                   </button>
                 );
               })}
             </div>
 
-            <div className="mt-7 flex flex-wrap gap-5 border-t border-[#EEE8DE] pt-5 text-xs text-[#817769]">
-              <span className="flex items-center gap-2">
-                <span className="h-2.5 w-2.5 rounded-full bg-[#C38D64]" />
-                Belum selesai
-              </span>
+            <div className="mt-5 border-t border-[#E9E0D4] pt-4">
+              <p className="text-sm font-semibold">
+                Tugas pada {formatDate(selectedDate)}
+              </p>
 
-              <span className="flex items-center gap-2">
-                <span className="h-2.5 w-2.5 rounded-full bg-[#8D9B80]" />
-                Selesai
-              </span>
+              {selectedTasks.length === 0 ? (
+                <p className="mt-3 text-sm text-[#8B857B]">
+                  Belum ada tugas dengan deadline pada tanggal ini.
+                </p>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  {selectedTasks.map((task) => (
+                    <label
+                      key={task.id}
+                      className="flex cursor-pointer items-center gap-3 text-sm"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={task.completed}
+                        onChange={() => toggleTask(task.id)}
+                        className="h-4 w-4 accent-[#82947B]"
+                      />
+
+                      <span
+                        className={
+                          task.completed
+                            ? "text-[#A49A8C] line-through"
+                            : ""
+                        }
+                      >
+                        {task.title}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* SELECTED DATE TASKS */}
-          <div className="rounded-2xl border border-[#E9DED0] bg-[#FFF9F0] p-5 shadow-sm sm:p-7">
-            <div className="flex items-center gap-3">
-              <ListTodo size={23} className="text-[#826049]" />
+          {/* SPRINT OVERVIEW */}
+          <div className="rounded-xl border border-[#E7DBCC] bg-[#F7EEE3] p-5">
+            <div className="flex items-center gap-2">
+              <CalendarDays
+                size={19}
+                className="text-[#506851]"
+              />
 
-              <h2 className="font-serif text-xl font-semibold">
-                Jadwal Tugas
+              <h2 className="text-base font-semibold">
+                Sprint Overview
               </h2>
             </div>
 
-            <p className="mt-3 text-sm capitalize text-[#817769]">
-              {formatDate(selectedDate)}
+            <p className="mt-3 text-xs text-[#8B857B]">
+              {formatDate(sprintStart)} - {formatDate(sprintEnd)}
             </p>
 
-            <div className="mt-6 space-y-3">
-              {selectedTasks.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-[#DDD2C3] bg-white p-6 text-center">
-                  <CalendarDays
-                    size={28}
-                    className="mx-auto text-[#A49A8C]"
-                  />
+            <p className="mt-2 text-xs text-[#8B857B]">
+              Ringkasan tugas dalam periode 14 hari.
+            </p>
 
-                  <p className="mt-3 text-sm font-medium">
-                    Belum ada deadline
-                  </p>
-
-                  <p className="mt-2 text-xs leading-5 text-[#817769]">
-                    Pilih tanggal lain atau tambahkan
-                    deadline melalui halaman Tugas.
-                  </p>
-                </div>
+            <div className="mt-5 divide-y divide-[#E9E0D4]">
+              {sprintTasks.length === 0 ? (
+                <p className="py-4 text-sm text-[#8B857B]">
+                  Belum ada tugas untuk periode ini.
+                </p>
               ) : (
-                selectedTasks.map((task) => (
+                sprintTasks.map((task) => (
                   <label
                     key={task.id}
-                    className="flex cursor-pointer items-start gap-3 rounded-xl border border-[#E9DED0] bg-white p-4"
+                    className="flex cursor-pointer items-center gap-3 py-3 text-sm"
                   >
                     <input
                       type="checkbox"
                       checked={task.completed}
                       onChange={() => toggleTask(task.id)}
-                      className="mt-1 h-4 w-4 accent-[#64765C]"
+                      className="h-4 w-4 accent-[#82947B]"
                     />
 
-                    <div className="min-w-0">
-                      <p
-                        className={`break-words text-sm font-medium ${
-                          task.completed
-                            ? "text-[#A49A8C] line-through"
-                            : "text-[#45453D]"
-                        }`}
-                      >
-                        {task.title}
-                      </p>
-
-                      <p className="mt-1 text-xs text-[#817769]">
-                        Prioritas:{" "}
-                        {task.priority === "High"
-                          ? "Tinggi"
-                          : task.priority === "Medium"
-                            ? "Sedang"
-                            : "Rendah"}
-                      </p>
-                    </div>
+                    <span
+                      className={
+                        task.completed
+                          ? "text-[#A49A8C] line-through"
+                          : ""
+                      }
+                    >
+                      {task.title}
+                    </span>
                   </label>
                 ))
               )}
             </div>
 
-            <p className="mt-6 text-xs text-[#9A8F81]">
-              {selectedTasks.length} tugas pada tanggal ini.
-            </p>
+            <Link
+              href="/tasks"
+              className="mt-5 inline-block text-sm text-[#8B857B] hover:text-[#826049]"
+            >
+              Lihat detail →
+            </Link>
           </div>
         </section>
-
-        <footer className="mt-10 text-center text-xs text-[#A49A8C]">
-          GradaTim — Plan, Focus, Achieve
-        </footer>
       </div>
     </DashboardLayout>
-  );
-}
-
-function SummaryCard({
-  label,
-  value,
-  icon,
-}: {
-  label: string;
-  value: number;
-  icon: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between rounded-2xl border border-[#E9DED0] bg-white p-6 shadow-sm">
-      <div>
-        <p className="text-sm text-[#817769]">{label}</p>
-        <p className="mt-2 text-3xl font-bold text-[#30312B]">
-          {value}
-        </p>
-      </div>
-
-      <div className="rounded-xl bg-[#E8EFE5] p-3 text-[#64765C]">
-        {icon}
-      </div>
-    </div>
   );
 }
