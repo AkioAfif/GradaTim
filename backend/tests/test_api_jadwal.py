@@ -579,3 +579,21 @@ def test_pindah_sesi_ditandai_dipindah(client, db, data):
     assert res.json()["dipindah"] is True
     db.refresh(sesi)
     assert sesi.dipindah is True
+
+
+def test_pindah_sesi_snapshot_fitur_ulang(client, db, data):
+    user, _, (_, b) = data  # sekarang Rabu 7/10 12:00
+    sesi = sesi_rabu(db, b)
+    sesi.fitur = {"versi": 1, "penanda": "lama"}
+    db.commit()
+    url = f"{URL}/sesi/{sesi.id_jadwal}"
+
+    client.patch(url, json={"status": "selesai"}, headers=auth(user))  # ubah status saja → snapshot tetap
+    db.refresh(sesi)
+    assert sesi.fitur == {"versi": 1, "penanda": "lama"}
+
+    client.patch(url, headers=auth(user),
+                 json={"waktu_mulai": "2026-10-08T19:30:00", "waktu_selesai": "2026-10-08T20:30:00"})
+    db.refresh(sesi)
+    assert (sesi.fitur["jam_mulai"], sesi.fitur["hari"]) == (19.5, 3)
+    assert sesi.fitur["dihitung_pada"] == "2026-10-07T12:00:00"

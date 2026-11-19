@@ -118,6 +118,11 @@ Aturannya: **fitur harus sudah diketahui sebelum sesi dimulai** (mencegah keboco
 - Fitur mood **digabungkan dari kuesioner hari itu**, hanya bila diisi sebelum sesi dimulai. Bila tidak,
   fitur mood kosong dan `mood_diisi = 0`.
 
+Implementasi: `jadwal_service.isi_fitur` mengisi `jadwal_task.fitur` saat sesi dibuat (penjadwalan goal,
+susun ulang) dan saat sesi dipindah manual (snapshot ulang, karena slotnya berubah). Riwayat 7 hari hanya
+menghitung sesi yang sudah dikonfirmasi (`selesai`/`dilewati`) dan sudah berakhir sebelum snapshot.
+Snapshot diberi nomor `versi` agar perubahan definisi fitur di kemudian hari tidak tercampur.
+
 ### Dua varian model
 
 Saat penjadwal menaruh sesi beberapa hari ke depan, mood belum ada. Memakai satu model dengan

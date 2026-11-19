@@ -27,6 +27,7 @@ from app.services.jadwal_service import (
     awal_minggu,
     cek_bentrok,
     hapus_sesi_pengganti,
+    isi_fitur,
     jam_aktif,
     jadwalkan_goal,
     ke_session,
@@ -686,3 +687,108 @@ def test_hapus_sesi_pengganti_tanpa_durasi_cukup_satu_selesai(db):
 def test_hapus_sesi_pengganti_menit_kurang(db):
     task = task_dengan_sesi(db, 90, [(6, 19, 45, JADWAL_SELESAI), (8, 19, 45, JADWAL_TERJADWAL)])
     assert hapus_sesi_pengganti(task, sekarang=dt(7, 12)) == []
+
+
+# ============================================================
+# SNAPSHOT FITUR (H2, docs/AI.md §2)
+# ============================================================
+
+def sesi_lama(db, task, mulai, menit, status):
+    db.add(JadwalTask(task=task, waktu_mulai=mulai, waktu_selesai=mulai + timedelta(minutes=menit), status=status))
+
+
+def test_isi_fitur_isi_lengkap_dan_riwayat_hanya_terkonfirmasi(db):
+    user, (lama, *_) = buat_user(db)
+    sekarang = dt(8, 12)  # Kamis 12:00
+    sesi_lama(db, lama, dt(7, 9), 60, JADWAL_SELESAI)            # dihitung
+    sesi_lama(db, lama, dt(6, 9), 60, JADWAL_DILEWATI)           # dihitung
+    sesi_lama(db, lama, dt(3, 9), 60, JADWAL_SELESAI)            # dihitung (5 hari lalu)
+    sesi_lama(db, lama, datetime(2026, 9, 30, 9), 60, JADWAL_SELESAI)  # > 7 hari → tidak
+    sesi_lama(db, lama, dt(7, 15), 60, JADWAL_TERJADWAL)         # belum dikonfirmasi → tidak
+    sesi_lama(db, lama, dt(7, 17), 60, JADWAL_TIDAK_DIKETAHUI)   # tidak diketahui → tidak
+    sesi_lama(db, lama, dt(8, 11, 30), 60, JADWAL_SELESAI)       # belum berakhir saat snapshot → tidak
+    sesi_lama(db, lama, dt(9, 8), 60, JADWAL_TERJADWAL)          # sesi lain Jumat pagi
+
+    goal, (task,) = buat_goal(db, user, [90], deadline=dt(12, 23))
+    task.tingkat_effort, task.tingkat_impact = "high", "medium"
+    baru = JadwalTask(task=task, waktu_mulai=dt(9, 19, 30), waktu_selesai=dt(9, 21), status=JADWAL_TERJADWAL)
+    db.add(baru)
+    db.flush()
+
+    isi_fitur(db, user, [baru], sekarang)
+
+    assert baru.fitur == {
+        "versi": 1,
+        "dihitung_pada": "2026-10-08T12:00:00",
+        "jam_mulai": 19.5,
+        "hari": 4,  # Jumat
+        "durasi_menit": 90,
+        "jam_sebelum_mulai": 31.5,
+        "effort": "high",
+        "impact": "medium",
+        "durasi_estimasi_task": 90,
+        "sisa_hari_deadline": 3,  # deadline goal (task tidak punya deadline sendiri)
+        "urutan_sesi_hari_itu": 2,
+        "jumlah_sesi_hari_itu": 2,
+        "riwayat_selesai": 2,
+        "riwayat_dilewati": 1,
+        "tingkat_selesai_riwayat": 0.6667,
+    }
+
+
+def test_isi_fitur_tanpa_riwayat_dan_deadline(db):
+    user, _ = buat_user(db)
+    _, (task,) = buat_goal(db, user, [None])
+    task.deadline = None
+    baru = JadwalTask(task=task, waktu_mulai=dt(9, 8), waktu_selesai=dt(9, 9), status=JADWAL_TERJADWAL)
+    db.add(baru)
+    db.flush()
+
+    isi_fitur(db, user, [baru], dt(8, 12))
+
+    f = baru.fitur
+    assert (f["tingkat_selesai_riwayat"], f["riwayat_selesai"], f["riwayat_dilewati"]) == (None, 0, 0)
+    assert (f["sisa_hari_deadline"], f["effort"], f["durasi_estimasi_task"]) == (None, None, None)
+    assert (f["urutan_sesi_hari_itu"], f["jumlah_sesi_hari_itu"]) == (1, 1)
+
+
+def test_isi_fitur_deadline_task_didahulukan(db):
+    user, _ = buat_user(db)
+    _, (task,) = buat_goal(db, user, [60], deadline=dt(30, 23))
+    task.deadline = dt(10, 23)
+    baru = JadwalTask(task=task, waktu_mulai=dt(9, 8), waktu_selesai=dt(9, 9), status=JADWAL_TERJADWAL)
+    db.add(baru)
+    db.flush()
+    isi_fitur(db, user, [baru], dt(8, 12))
+    assert baru.fitur["sisa_hari_deadline"] == 1
+
+
+def test_jadwalkan_goal_isi_fitur_semua_sesi_baru(db, jam_8_21):
+    user, _ = buat_user(db)
+    goal, _ = buat_goal(db, user, [60, 60, 60])
+
+    hasil = jadwalkan_goal(db, user, goal, SENIN_PAGI)
+
+    assert hasil.sesi_baru and all(s.fitur["versi"] == 1 for s in hasil.sesi_baru)
+    assert all(s.fitur["dihitung_pada"] == SENIN_PAGI.isoformat() for s in hasil.sesi_baru)
+    # sesi dalam batch yang sama ikut dihitung di urutan hari itu
+    senin = [s.fitur for s in hasil.sesi_baru if s.waktu_mulai.date() == SENIN_PAGI.date()]
+    assert sorted(f["urutan_sesi_hari_itu"] for f in senin) == list(range(1, len(senin) + 1))
+
+
+def test_susun_ulang_isi_fitur_hanya_sesi_baru(db, jam_8_21):
+    user, _ = buat_user(db)
+    goal, (a, b) = buat_goal(db, user, [60, 60])
+    tetap = JadwalTask(task=b, waktu_mulai=dt(9, 9), waktu_selesai=dt(9, 10), status=JADWAL_TERJADWAL,
+                       fitur={"versi": 1, "penanda": "lama"})
+    db.add_all([
+        JadwalTask(task=a, waktu_mulai=dt(7, 9), waktu_selesai=dt(7, 10), status=JADWAL_TERJADWAL),  # terlewat
+        tetap,
+    ])
+    db.flush()
+
+    hasil = susun_ulang_minggu_ini(db, user, dt(7, 12))
+
+    (baru,) = hasil.sesi_baru
+    assert baru.fitur["dihitung_pada"] == dt(7, 12).isoformat()
+    assert tetap.fitur == {"versi": 1, "penanda": "lama"}  # sesi yang tidak dipindah tidak disentuh
