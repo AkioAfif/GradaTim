@@ -1,5 +1,6 @@
 """Unit tests untuk app/services/jadwal_service.py (database SQLite in-memory)"""
 
+import random
 from datetime import datetime, time, timedelta
 
 import pytest
@@ -792,3 +793,32 @@ def test_susun_ulang_isi_fitur_hanya_sesi_baru(db, jam_8_21):
     (baru,) = hasil.sesi_baru
     assert baru.fitur["dihitung_pada"] == dt(7, 12).isoformat()
     assert tetap.fitur == {"versi": 1, "penanda": "lama"}  # sesi yang tidak dipindah tidak disentuh
+
+
+# ============================================================
+# EKSPLORASI (H3)
+# ============================================================
+
+@pytest.mark.parametrize("rasio, diharapkan", [(0.0, False), (1.0, True)])
+def test_jadwalkan_goal_tandai_sesi_eksplorasi(db, jam_8_21, monkeypatch, rasio, diharapkan):
+    monkeypatch.setattr(jadwal_service.settings, "EKSPLORASI_RASIO", rasio)
+    user, _ = buat_user(db)
+    goal, _ = buat_goal(db, user, [60, 60])
+
+    hasil = jadwalkan_goal(db, user, goal, SENIN_PAGI, rng=random.Random(3))
+
+    assert len(hasil.sesi_baru) == 2
+    assert all(s.eksplorasi is diharapkan for s in hasil.sesi_baru)
+    assert all(s.fitur is not None for s in hasil.sesi_baru)  # sesi eksplorasi tetap punya snapshot
+
+
+def test_susun_ulang_tidak_eksplorasi(db, jam_8_21, monkeypatch):
+    monkeypatch.setattr(jadwal_service.settings, "EKSPLORASI_RASIO", 1.0)
+    user, _ = buat_user(db)
+    goal, (a,) = buat_goal(db, user, [60])
+    db.add(JadwalTask(task=a, waktu_mulai=dt(7, 9), waktu_selesai=dt(7, 10), status=JADWAL_TERJADWAL))
+    db.flush()
+
+    (baru,) = susun_ulang_minggu_ini(db, user, dt(7, 12)).sesi_baru
+
+    assert baru.eksplorasi is False

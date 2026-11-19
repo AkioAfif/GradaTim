@@ -1,5 +1,6 @@
 """Unit tests untuk app/services/scheduler.py"""
 
+import random
 from datetime import datetime, time
 
 import pytest
@@ -448,3 +449,67 @@ def test_replan_result_has_no_conflicts():
     result = replan(sessions, slots, dt(7, 21, 30), depends_on={2: (1,), 3: (2,)})
     assert result.unscheduled == []
     assert validate_schedule(result.sessions, busy_blocks(start, end, [kuliah])) == []
+
+
+# ------------------------------------------------------------
+# EKSPLORASI SLOT ACAK (docs/AI.md §2)
+# ------------------------------------------------------------
+
+def day_slots(days=range(5, 10)):
+    """Senin-Jumat 08:00-21:00 — banyak posisi mulai yang valid."""
+    return [iv(d, 8, 21) for d in days]
+
+
+def test_explore_off_by_default_same_as_before():
+    tasks = [T(n, 60) for n in range(1, 4)]
+    assert schedule_tasks(tasks, day_slots()) == schedule_tasks(tasks, day_slots(), explore_rate=0.0)
+    assert schedule_tasks(tasks, day_slots()).explored == []
+
+
+def test_explore_random_position_within_constraints():
+    slots = day_slots()
+    earliest = dt(6, 10, 7)
+    starts = set()
+    for seed in range(30):
+        result = schedule_tasks([T(1, 60, earliest=earliest)], slots, explore_rate=1.0, rng=random.Random(seed))
+        assert result.explored == [1]
+        (piece,) = sessions_of(result, 1)  # satu sesi utuh
+        assert piece.minutes == 60 and piece.start >= earliest
+        assert piece.start.minute % 15 == 0
+        assert any(s.start <= piece.start and piece.end <= s.end for s in slots)
+        starts.add(piece.start)
+    # posisinya benar-benar acak, bukan selalu slot paling awal (10:15)
+    assert len(starts) > 10
+
+
+def test_explore_deterministic_with_same_seed():
+    tasks = [T(n, 45) for n in range(1, 6)]
+    a = schedule_tasks(tasks, day_slots(), explore_rate=0.5, rng=random.Random(7))
+    b = schedule_tasks(tasks, day_slots(), explore_rate=0.5, rng=random.Random(7))
+    assert a == b
+
+
+def test_explore_skips_tasks_with_successor():
+    for seed in range(20):
+        result = schedule_tasks([T(1, 60), T(2, 60, deps=[1])], day_slots(), explore_rate=1.0,
+                                rng=random.Random(seed))
+        assert result.explored == [2]  # task 1 punya penerus → cara biasa
+        assert sessions_of(result, 2)[0].start >= sessions_of(result, 1)[-1].end
+        assert result.unscheduled == []
+
+
+def test_explore_respects_daily_cap():
+    # Senin sudah penuh oleh sesi lain → posisi acak tidak boleh jatuh di Senin
+    for seed in range(20):
+        result = schedule_tasks([T(1, 60)], [iv(5, 8, 21), iv(6, 8, 21)], existing_load={dt(5, 0).date(): 600},
+                                explore_rate=1.0, rng=random.Random(seed))
+        (piece,) = sessions_of(result, 1)
+        assert piece.start.date() == dt(6, 0).date()
+        assert result.daily_load()[piece.start.date()] <= result.daily_cap_minutes
+
+
+def test_explore_falls_back_when_no_single_slot_fits():
+    # 90 menit tidak muat utuh di slot 60 menit mana pun → dipecah cara biasa, tidak ditandai eksplorasi
+    result = schedule_tasks([T(1, 90)], [iv(5, 19, 20), iv(6, 19, 20)], explore_rate=1.0, rng=random.Random(1))
+    assert result.explored == []
+    assert sum(p.minutes for p in sessions_of(result, 1)) == 90

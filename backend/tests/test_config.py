@@ -55,3 +55,17 @@ def test_ke_wib_naif_naive_tidak_diubah():
 def test_hari_ini_memakai_wib():
     assert isinstance(waktu.hari_ini(), date)
     assert waktu.hari_ini() == datetime.now(waktu.WIB).date()
+
+
+
+def test_eksplorasi_rasio_default_mati():
+    assert _settings().EKSPLORASI_RASIO == 0.0
+
+
+def test_eksplorasi_rasio_harus_0_sampai_1():
+    import pytest
+    from pydantic import ValidationError
+
+    assert _settings(EKSPLORASI_RASIO="0.2").EKSPLORASI_RASIO == 0.2
+    with pytest.raises(ValidationError):
+        _settings(EKSPLORASI_RASIO=1.5)
