@@ -6,7 +6,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core import waktu
-from app.core.status import JADWAL_SELESAI, JADWAL_TERJADWAL
+from app.core.status import JADWAL_DILEWATI, JADWAL_SELESAI, JADWAL_TERJADWAL
 
 
 class BlokKalender(BaseModel):
@@ -26,7 +26,8 @@ class SesiRead(BaseModel):
     nama_task: str
     waktu_mulai: datetime
     waktu_selesai: datetime
-    status: str  # terjadwal | selesai | dilewati
+    status: str  # terjadwal | selesai | dilewati | tidak_diketahui
+    dipindah: bool  # pernah dipindah manual oleh user
     status_task: str  # todo | in_progress | done — ikut berubah saat sesi ditandai selesai / dibatalkan
 
 
@@ -67,13 +68,16 @@ class HasilSusunUlangRead(BaseModel):
     # tidak muat lagi minggu ini → user memilih konsekuensinya (D12)
     tidak_muat: list[TaskRingkas]
     sesi_baru: list[SesiRead]
-    sesi_dilewati: list[SesiRead]  # sesi terlewat, kini berstatus `dilewati` (riwayat)
+    # sesi terlewat tanpa konfirmasi, kini berstatus `tidak_diketahui`; user masih bisa mengonfirmasi
+    # selesai/dilewati lewat PATCH /jadwal/sesi/{id} sampai KONFIRMASI_BATAS_JAM setelah sesi berakhir
+    sesi_terlewat: list[SesiRead]
 
 
 class SesiUpdate(BaseModel):
-    """Ubah satu sesi: tandai selesai / batal selesai, dan/atau pindah waktu (keduanya wajib bersama)."""
+    """Ubah satu sesi: konfirmasi selesai / tidak dikerjakan (`dilewati`) / batal selesai, dan/atau pindah
+    waktu (waktu_mulai & waktu_selesai wajib bersama). `tidak_diketahui` hanya diset sistem."""
 
-    status: Optional[Literal[JADWAL_TERJADWAL, JADWAL_SELESAI]] = None  # `dilewati` hanya lewat susun ulang
+    status: Optional[Literal[JADWAL_TERJADWAL, JADWAL_SELESAI, JADWAL_DILEWATI]] = None
     waktu_mulai: Optional[datetime] = None
     waktu_selesai: Optional[datetime] = None
 

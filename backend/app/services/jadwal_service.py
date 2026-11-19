@@ -24,9 +24,10 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.core.config import settings
 from app.core.status import (
-    JADWAL_DILEWATI,
     JADWAL_SELESAI,
     JADWAL_TERJADWAL,
+    JADWAL_TIDAK_AKTIF,
+    JADWAL_TIDAK_DIKETAHUI,
     MILESTONE_TIPE_MINGGUAN,
     TASK_DONE,
     TASK_IN_PROGRESS,
@@ -50,7 +51,8 @@ from app.services.scheduler import (
     subtract_intervals,
 )
 
-# Sesi `dilewati` hanya riwayat — tidak dianggap sibuk & tidak dijadwalkan ulang lagi.
+# Sesi `dilewati` / `tidak_diketahui` (JADWAL_TIDAK_AKTIF) hanya riwayat — tidak dianggap sibuk
+# & tidak dijadwalkan ulang lagi.
 DEFAULT_DURASI_MENIT = 30  # untuk task tanpa durasi_estimasi
 
 
@@ -81,9 +83,11 @@ def agenda_user(db: DbSession, user: User, mulai: datetime, akhir: datetime) -> 
     return [agenda_ke_busy_block(r) for r in rows]
 
 
-def sesi_user(db: DbSession, user: User, mulai: datetime, akhir: datetime) -> list[JadwalTask]:
+def sesi_user(
+    db: DbSession, user: User, mulai: datetime, akhir: datetime, kecuali: Iterable[str] = JADWAL_TIDAK_AKTIF
+) -> list[JadwalTask]:
     """Sesi jadwal_task milik user (lewat task → milestone → goal) yang beririsan dengan [mulai, akhir).
-    Sesi berstatus `dilewati` tidak ikut (hanya riwayat)."""
+    Sesi berstatus `kecuali` tidak ikut — default: sesi riwayat (`dilewati`, `tidak_diketahui`)."""
     return list(db.scalars(
         select(JadwalTask)
         .join(Task, JadwalTask.id_task == Task.id_task)
@@ -91,7 +95,7 @@ def sesi_user(db: DbSession, user: User, mulai: datetime, akhir: datetime) -> li
         .join(Goal, Milestone.id_goal == Goal.id_goal)
         .where(
             Goal.id_user == user.id_user,
-            JadwalTask.status != JADWAL_DILEWATI,
+            JadwalTask.status.not_in(tuple(kecuali)),
             JadwalTask.waktu_selesai > mulai,
             JadwalTask.waktu_mulai < akhir,
         )
@@ -161,7 +165,7 @@ def minggu_sudah_tiba(milestone: Milestone, sekarang: datetime) -> bool:
 
 def task_belum_terjadwal(db: DbSession, goal: Goal, sekarang: datetime) -> list[Task]:
     """Task goal yang perlu dijadwalkan: belum selesai, tidak punya sub-task (yang dikerjakan
-    sub-task-nya), belum punya sesi selain yang `dilewati`, dan minggunya sudah tiba
+    sub-task-nya), belum punya sesi selain sesi riwayat (`dilewati`/`tidak_diketahui`), dan minggunya sudah tiba
     (`minggu_sudah_tiba`) — task minggu depan tidak ikut dijadwalkan minggu ini.
     Diurutkan menurut urutan milestone, lalu id_task — penjadwal memakai urutan ini untuk task
     yang sama-sama siap dikerjakan."""
@@ -175,7 +179,7 @@ def task_belum_terjadwal(db: DbSession, goal: Goal, sekarang: datetime) -> list[
     sudah_terjadwal = set(db.scalars(
         select(JadwalTask.id_task).where(
             JadwalTask.id_task.in_([t.id_task for t in tasks]),
-            JadwalTask.status != JADWAL_DILEWATI,
+            JadwalTask.status.not_in(JADWAL_TIDAK_AKTIF),
         )
     ).all())
     tasks = [
@@ -201,7 +205,7 @@ def _selesai_prasyarat_luar(db: DbSession, id_tasks: set[int]) -> dict[int, date
         .join(Task, JadwalTask.id_task == Task.id_task)
         .where(
             JadwalTask.id_task.in_(id_tasks),
-            JadwalTask.status != JADWAL_DILEWATI,
+            JadwalTask.status.not_in(JADWAL_TIDAK_AKTIF),
             Task.status != TASK_DONE,
         )
     ).all()
@@ -285,7 +289,8 @@ class HasilSusunUlang:
     dipindah: list[int] = field(default_factory=list)  # id_task yang sesinya dijadwalkan ulang
     tidak_muat: list[int] = field(default_factory=list)  # tidak muat lagi minggu ini → user memilih konsekuensi (D12)
     sesi_baru: list[JadwalTask] = field(default_factory=list)  # baris jadwal_task pengganti
-    sesi_dilewati: list[JadwalTask] = field(default_factory=list)  # sesi terlewat, kini berstatus `dilewati`
+    # sesi terlewat tanpa konfirmasi, kini berstatus `tidak_diketahui` (user masih bisa mengonfirmasi)
+    sesi_terlewat: list[JadwalTask] = field(default_factory=list)
 
 
 def susun_ulang_minggu_ini(
@@ -297,7 +302,8 @@ def susun_ulang_minggu_ini(
     ditunda: id_task yang hari ini ditunda — sesinya yang belum lewat hari ini dipindah mulai besok.
 
     Perubahan di tabel jadwal_task:
-    - sesi yang terlewat (sudah lewat, masih `terjadwal`) → status `dilewati`, disimpan sebagai riwayat
+    - sesi yang terlewat (sudah lewat, masih `terjadwal`) → status `tidak_diketahui`, disimpan sebagai
+      riwayat. Bukan `dilewati`: bisa saja dikerjakan tapi lupa dicentang (label dataset, docs/AI.md §2)
     - sesi mendatang yang ikut dipindah (ditunda, atau task-nya bergantung pada task yang
       dipindah) → dihapus
     - sesi pengganti → baris baru berstatus `terjadwal`
@@ -332,11 +338,11 @@ def susun_ulang_minggu_ini(
         else:
             dipindah.append(row)
 
-    sesi_dilewati = []
+    sesi_terlewat = []
     for row in dipindah:
         if row.waktu_selesai <= sekarang:
-            row.status = JADWAL_DILEWATI
-            sesi_dilewati.append(row)
+            row.status = JADWAL_TIDAK_DIKETAHUI
+            sesi_terlewat.append(row)
         else:
             db.delete(row)
 
@@ -351,7 +357,7 @@ def susun_ulang_minggu_ini(
         dipindah=hasil.rescheduled,
         tidak_muat=hasil.unscheduled,
         sesi_baru=sesi_baru,
-        sesi_dilewati=sesi_dilewati,
+        sesi_terlewat=sesi_terlewat,
     )
 
 
@@ -382,7 +388,7 @@ def cek_bentrok(db: DbSession, user: User, waktu: Interval, kecuali_id_jadwal: i
 def perbarui_status_task(task: Task) -> str:
     """Hitung ulang `task.status` dari sesi-sesinya, dipanggil setiap kali status sebuah sesi diubah.
 
-    Sesi `dilewati` tidak dihitung (sudah diganti sesi lain, atau tidak muat lagi).
+    Sesi riwayat (`dilewati`/`tidak_diketahui`) tidak dihitung (sudah diganti sesi lain, atau tidak muat lagi).
     - `done`: semua sesi lain sudah `selesai` DAN total menit sesi `selesai` >= durasi_estimasi
       (tanpa durasi: cukup satu sesi `selesai`). Syarat menit mencegah task jadi `done` padahal sebagian
       sesinya dilewati tanpa pengganti.
@@ -390,12 +396,32 @@ def perbarui_status_task(task: Task) -> str:
     - `todo`: belum ada sesi `selesai` (mis. sesi satu-satunya dibatalkan kembali ke `terjadwal`)
     Status yang diubah manual lewat PATCH /tasks tetap, sampai ada sesi task itu yang diubah statusnya.
     """
-    sesi = [s for s in task.jadwal if s.status != JADWAL_DILEWATI]
+    sesi = [s for s in task.jadwal if s.status not in JADWAL_TIDAK_AKTIF]
     selesai = [s for s in sesi if s.status == JADWAL_SELESAI]
     if not selesai:
         task.status = TASK_TODO
         return task.status
-    menit = sum(int((s.waktu_selesai - s.waktu_mulai).total_seconds() // 60) for s in selesai)
+    menit = menit_sesi_selesai(task)
     cukup = menit >= task.durasi_estimasi if task.durasi_estimasi else True
     task.status = TASK_DONE if len(selesai) == len(sesi) and cukup else TASK_IN_PROGRESS
     return task.status
+
+
+def menit_sesi_selesai(task: Task) -> int:
+    return sum(
+        int((s.waktu_selesai - s.waktu_mulai).total_seconds() // 60) for s in task.jadwal if s.status == JADWAL_SELESAI
+    )
+
+
+def hapus_sesi_pengganti(task: Task, sekarang: datetime) -> list[JadwalTask]:
+    """Dipanggil saat sesi `tidak_diketahui` dikonfirmasi `selesai` terlambat — susun ulang sudah sempat
+    membuatkan sesi pengganti. Jika menit sesi `selesai` kini sudah memenuhi durasi_estimasi (tanpa durasi:
+    cukup satu sesi selesai), sesi `terjadwal` task ini yang belum mulai dihapus. Panggil
+    `perbarui_status_task` sesudahnya."""
+    cukup = menit_sesi_selesai(task) >= task.durasi_estimasi if task.durasi_estimasi else True
+    if not cukup:
+        return []
+    pengganti = [s for s in task.jadwal if s.status == JADWAL_TERJADWAL and s.waktu_mulai >= sekarang]
+    for s in pengganti:
+        task.jadwal.remove(s)  # cascade delete-orphan → baris dihapus saat flush
+    return pengganti

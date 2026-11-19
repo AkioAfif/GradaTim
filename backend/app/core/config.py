@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     JAM_AKTIF_MULAI: time = time(6, 0)
     JAM_AKTIF_SELESAI: time = time(22, 0)
 
+    # Status sesi hanya boleh diubah sampai sekian jam setelah sesi berakhir (label dataset, docs/AI.md §2)
+    KONFIRMASI_BATAS_JAM: int = 48
+
     # extra="ignore": variabel lama di .env (mis. OPENAI_API_KEY) tidak bikin crash
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

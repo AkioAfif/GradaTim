@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 import app.models  # noqa: F401 — daftarkan semua tabel ke Base.metadata
 from app.core.status import (
     JADWAL_DILEWATI,
+    JADWAL_TIDAK_DIKETAHUI,
     JADWAL_SELESAI,
     JADWAL_TERJADWAL,
     MILESTONE_TIPE_MINGGUAN,
@@ -25,6 +26,7 @@ from app.services.jadwal_service import (
     agenda_user,
     awal_minggu,
     cek_bentrok,
+    hapus_sesi_pengganti,
     jam_aktif,
     jadwalkan_goal,
     ke_session,
@@ -459,7 +461,7 @@ def test_susun_ulang_missed_session_kept_as_history_and_rescheduled(db, jam_8_21
     hasil = susun_ulang_minggu_ini(db, user, RABU_SIANG)
 
     assert hasil.dipindah == [a.id_task] and hasil.tidak_muat == []
-    assert hasil.sesi_dilewati == [terlewat] and terlewat.status == JADWAL_DILEWATI
+    assert hasil.sesi_terlewat == [terlewat] and terlewat.status == JADWAL_TIDAK_DIKETAHUI
     assert [(s.id_task, s.status) for s in hasil.sesi_baru] == [(a.id_task, JADWAL_TERJADWAL)]
     baru = hasil.sesi_baru[0]
     assert baru.id_jadwal is not None
@@ -481,7 +483,7 @@ def test_susun_ulang_moves_dependent_sessions(db, jam_8_21):
     hasil = susun_ulang_minggu_ini(db, user, RABU_SIANG)
 
     assert hasil.dipindah == sorted([a.id_task, b.id_task])
-    assert [s.status for s in sesi_tersimpan(db, a)] == [JADWAL_DILEWATI, JADWAL_TERJADWAL]
+    assert [s.status for s in sesi_tersimpan(db, a)] == [JADWAL_TIDAK_DIKETAHUI, JADWAL_TERJADWAL]
     (sesi_b,) = sesi_tersimpan(db, b)  # sesi lama b dihapus, bukan ditandai dilewati
     assert sesi_tersimpan(db, a)[-1].waktu_selesai <= sesi_b.waktu_mulai
 
@@ -493,7 +495,7 @@ def test_susun_ulang_deferred_task_moves_to_tomorrow(db, jam_8_21):
 
     hasil = susun_ulang_minggu_ini(db, user, RABU_SIANG, ditunda=[a.id_task])
 
-    assert hasil.dipindah == [a.id_task] and hasil.sesi_dilewati == []
+    assert hasil.dipindah == [a.id_task] and hasil.sesi_terlewat == []
     (sesi_a,) = sesi_tersimpan(db, a)
     assert sesi_a.waktu_mulai >= dt(8, 0) and sesi_a.status == JADWAL_TERJADWAL
     assert [s.waktu_mulai for s in sesi_tersimpan(db, b)] == [dt(7, 17)]
@@ -520,7 +522,7 @@ def test_susun_ulang_reports_tasks_that_no_longer_fit(db, jam_8_21):
     hasil = susun_ulang_minggu_ini(db, user, dt(11, 20, 30))  # Minggu 20:30, sisa 30 menit
 
     assert hasil.tidak_muat == [a.id_task] and hasil.dipindah == [] and hasil.sesi_baru == []
-    assert terlewat.status == JADWAL_DILEWATI
+    assert terlewat.status == JADWAL_TIDAK_DIKETAHUI
 
 
 def test_susun_ulang_only_touches_own_sessions_and_has_no_conflicts(db, user_lengkap, jam_8_21):
@@ -609,3 +611,78 @@ def test_perbarui_status_task_menimpa_status_manual(db):
     task = task_dengan_sesi(db, 60, [(6, 19, 60, JADWAL_TERJADWAL)])
     task.status = TASK_DONE
     assert perbarui_status_task(task) == TASK_TODO
+
+
+# ============================================================
+# SESI RIWAYAT: `dilewati` DAN `tidak_diketahui` DIPERLAKUKAN SAMA (JADWAL_TIDAK_AKTIF)
+# ============================================================
+
+# Ditulis eksplisit (bukan JADWAL_TIDAK_AKTIF) agar tes gagal bila satu status terlupa di konstanta itu
+STATUS_RIWAYAT = [JADWAL_DILEWATI, JADWAL_TIDAK_DIKETAHUI]
+
+@pytest.mark.parametrize("status", STATUS_RIWAYAT)
+def test_sesi_riwayat_tidak_memblokir_slot(db, status):
+    user, (task, *_) = buat_user(db)
+    db.add(JadwalTask(task=task, waktu_mulai=dt(7, 9), waktu_selesai=dt(7, 10), status=status))
+    db.flush()
+
+    assert sesi_user(db, user, *MINGGU_INI) == []
+    assert cek_bentrok(db, user, Interval(dt(7, 9), dt(7, 10))) == []
+
+
+@pytest.mark.parametrize("status", STATUS_RIWAYAT)
+def test_task_dengan_sesi_riwayat_saja_dijadwalkan_ulang(db, jam_8_21, status):
+    user, _ = buat_user(db)
+    goal, (task,) = buat_goal(db, user, [60])
+    db.add(JadwalTask(task=task, waktu_mulai=dt(2, 9), waktu_selesai=dt(2, 10), status=status))
+    db.flush()
+
+    hasil = jadwalkan_goal(db, user, goal, SENIN_PAGI)
+
+    assert [s.id_task for s in hasil.sesi_baru] == [task.id_task]
+
+
+@pytest.mark.parametrize("status", STATUS_RIWAYAT)
+def test_prasyarat_dengan_sesi_riwayat_tidak_ditunggu(db, jam_8_21, status):
+    """Sesi riwayat prasyarat (minggu depan) tidak membuat task penerusnya menunggu → keduanya muat."""
+    user, _ = buat_user(db)
+    goal, (prasyarat, task) = buat_goal(db, user, [60, 60])
+    db.add_all([
+        JadwalTask(task=prasyarat, waktu_mulai=dt(13, 9), waktu_selesai=dt(13, 10), status=status),
+        TaskDependency(task=task, task_prasyarat=prasyarat),
+    ])
+    db.flush()
+
+    hasil = jadwalkan_goal(db, user, goal, SENIN_PAGI)
+
+    assert [s.id_task for s in hasil.sesi_baru] == [prasyarat.id_task, task.id_task]
+    assert hasil.tidak_muat == []
+
+
+@pytest.mark.parametrize("status", STATUS_RIWAYAT)
+def test_perbarui_status_task_abaikan_sesi_riwayat(db, status):
+    task = task_dengan_sesi(db, 90, [(6, 19, 45, status), (7, 19, 45, JADWAL_SELESAI), (8, 19, 45, JADWAL_SELESAI)])
+    assert perbarui_status_task(task) == TASK_DONE
+
+
+def test_hapus_sesi_pengganti_hanya_sesi_terjadwal_yang_belum_mulai(db):
+    task = task_dengan_sesi(db, 60, [
+        (6, 19, 60, JADWAL_SELESAI),      # konfirmasi terlambat
+        (7, 9, 60, JADWAL_TERJADWAL),     # sudah mulai → dibiarkan
+        (8, 19, 60, JADWAL_TERJADWAL),    # pengganti → dihapus
+    ])
+    (dihapus,) = hapus_sesi_pengganti(task, sekarang=dt(7, 9, 30))
+    db.flush()
+
+    assert dihapus.waktu_mulai == dt(8, 19)
+    assert [s.waktu_mulai for s in task.jadwal] == [dt(6, 19), dt(7, 9)]
+
+
+def test_hapus_sesi_pengganti_tanpa_durasi_cukup_satu_selesai(db):
+    task = task_dengan_sesi(db, None, [(6, 19, 30, JADWAL_SELESAI), (8, 19, 30, JADWAL_TERJADWAL)])
+    assert len(hapus_sesi_pengganti(task, sekarang=dt(7, 12))) == 1
+
+
+def test_hapus_sesi_pengganti_menit_kurang(db):
+    task = task_dengan_sesi(db, 90, [(6, 19, 45, JADWAL_SELESAI), (8, 19, 45, JADWAL_TERJADWAL)])
+    assert hapus_sesi_pengganti(task, sekarang=dt(7, 12)) == []
