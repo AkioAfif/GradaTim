@@ -184,7 +184,10 @@ Primary key komposit `(id_task, id_task_prasyarat)`; constraint
 | `id_task` | integer, FK → `task.id_task` | tidak | Task yang dikerjakan di sesi ini (satu task boleh beberapa sesi) |
 | `waktu_mulai` | timestamp | tidak | Mulai sesi (WIB) |
 | `waktu_selesai` | timestamp | tidak | Selesai sesi (WIB) |
-| `status` | varchar(20) | tidak | `terjadwal` (default) / `selesai` / `dilewati`. Sesi terlewat tidak dihapus: jadi `dilewati` dan dibuat sesi baru |
+| `status` | varchar(20) | tidak | `terjadwal` (default) / `selesai` / `dilewati` (user konfirmasi tidak dikerjakan) / `tidak_diketahui`. Sesi terlewat tanpa konfirmasi tidak dihapus: saat susun ulang jadi `tidak_diketahui` dan dibuat sesi baru; user masih bisa mengonfirmasinya sampai `KONFIRMASI_BATAS_JAM` (48) jam setelah sesi berakhir |
+| `dipindah` | boolean, default false | tidak | Sesi pernah dipindah manual oleh user (`PATCH /jadwal/sesi`) |
+| `eksplorasi` | boolean, default false | tidak | Slot sesi dipilih acak untuk riset (docs/AI.md §2) |
+| `fitur` | JSON | ya | Snapshot fitur model personalisasi saat sesi dijadwalkan (docs/AI.md §2) |
 
 ### `time_constraint` (kegiatan rutin mingguan)
 
@@ -235,6 +238,8 @@ Primary key komposit `(id_task, id_task_prasyarat)`; constraint
 | `JADWAL_TERJADWAL` | `terjadwal` | `jadwal_task.status` (default) |
 | `JADWAL_SELESAI` | `selesai` | `jadwal_task.status` |
 | `JADWAL_DILEWATI` | `dilewati` | `jadwal_task.status` |
+| `JADWAL_TIDAK_DIKETAHUI` | `tidak_diketahui` | `jadwal_task.status` |
+| `JADWAL_TIDAK_AKTIF` | (`dilewati`, `tidak_diketahui`) | sesi riwayat: tidak sibuk, tidak dihitung terjadwal / di status task |
 | `GOAL_ACTIVE` | `active` | `goal.status` (default) |
 | `MILESTONE_TIPE_BULANAN` | `bulanan` | `milestone.tipe` |
 | `MILESTONE_TIPE_MINGGUAN` | `mingguan` | `milestone.tipe` |

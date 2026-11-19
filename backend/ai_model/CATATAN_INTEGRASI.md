@@ -93,7 +93,7 @@ ke `jadwal_task`.
 - **Status task otomatis (FR-10):** setiap kali status sesi diubah lewat `PATCH /api/v1/jadwal/sesi/{id}`,
   `task.status` dihitung ulang (`jadwal_service.perbarui_status_task`) dan dikembalikan di `status_task`:
 
-  | Kondisi sesi task (sesi `dilewati` tidak dihitung) | `task.status` |
+  | Kondisi sesi task (sesi `dilewati`/`tidak_diketahui` tidak dihitung) | `task.status` |
   | --- | --- |
   | Semua sesi `selesai` **dan** total menit sesi `selesai` ≥ `durasi_estimasi` (tanpa durasi: ≥ 1 sesi) | `done` |
   | Ada sesi `selesai`, tapi belum memenuhi baris di atas | `in_progress` |

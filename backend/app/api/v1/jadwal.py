@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user, get_db
 from app.core import waktu
 from app.core.config import settings
-from app.core.status import JADWAL_DILEWATI
+from app.core.status import JADWAL_DILEWATI, JADWAL_SELESAI, JADWAL_TERJADWAL, JADWAL_TIDAK_DIKETAHUI
 from app.models import Goal, JadwalTask, Milestone, Task, User
 from app.schemas.jadwal import (
     BlokKalender,
@@ -29,9 +29,11 @@ from app.schemas.jadwal import (
 from app.services.jadwal_service import (
     awal_minggu,
     cek_bentrok,
+    hapus_sesi_pengganti,
     jadwalkan_goal,
     muat_konteks,
     perbarui_status_task,
+    sesi_user,
     susun_ulang_minggu_ini,
 )
 from app.services.scheduler import Interval, busy_blocks
@@ -53,6 +55,7 @@ def _ke_sesi_read(row: JadwalTask) -> SesiRead:
         waktu_mulai=row.waktu_mulai,
         waktu_selesai=row.waktu_selesai,
         status=row.status,
+        dipindah=row.dipindah,
         status_task=row.task.status,
     )
 
@@ -68,7 +71,8 @@ def lihat_jadwal_mingguan(
     current_user: User = Depends(get_current_user),
 ) -> JadwalMingguan:
     """Isi kalender satu minggu (Senin–Minggu): kegiatan rutin, agenda, dan sesi task.
-    Sesi berstatus `dilewati` tidak ditampilkan (hanya riwayat)."""
+    Sesi `dilewati` tidak ditampilkan (riwayat). Sesi `tidak_diketahui` ditampilkan agar user bisa
+    mengonfirmasinya, tapi tidak dianggap sibuk oleh penjadwal."""
     mulai = awal_minggu(datetime.combine(minggu, datetime.min.time()) if minggu else _sekarang())
     akhir = mulai + timedelta(days=7)
     konteks = muat_konteks(db, current_user, mulai, akhir)
@@ -82,7 +86,7 @@ def lihat_jadwal_mingguan(
                         for b in blok_rutin],
         agenda=[BlokKalender(nama=b.label, waktu_mulai=b.interval.start, waktu_selesai=b.interval.end)
                 for b in sorted(konteks.agenda, key=lambda b: b.interval.start)],
-        sesi=[_ke_sesi_read(r) for r in konteks.sesi],
+        sesi=[_ke_sesi_read(r) for r in sesi_user(db, current_user, mulai, akhir, kecuali=(JADWAL_DILEWATI,))],
     )
 
 
@@ -139,7 +143,7 @@ def susun_ulang_jadwal(
         dipindah=_task_ringkas(db, hasil.dipindah),
         tidak_muat=_task_ringkas(db, hasil.tidak_muat),
         sesi_baru=[_ke_sesi_read(r) for r in hasil.sesi_baru],
-        sesi_dilewati=[_ke_sesi_read(r) for r in hasil.sesi_dilewati],
+        sesi_terlewat=[_ke_sesi_read(r) for r in hasil.sesi_terlewat],
     )
 
 
@@ -150,11 +154,19 @@ def ubah_sesi(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> SesiRead:
-    """Tandai sesi selesai (atau batalkan), dan/atau pindahkan sesi secara manual.
+    """Konfirmasi sesi (selesai / tidak dikerjakan = `dilewati`, atau batal selesai), dan/atau pindahkan
+    sesi secara manual. Aturan (409 bila dilanggar):
+
+    - Sesi `dilewati` adalah riwayat dan tidak bisa diubah.
+    - Sesi `tidak_diketahui` (terlewat tanpa konfirmasi) hanya bisa dikonfirmasi `selesai`/`dilewati`,
+      tidak bisa dipindah. Jika dikonfirmasi `selesai` dan menitnya sudah memenuhi durasi task, sesi
+      pengganti buatan susun ulang yang belum mulai dihapus (`hapus_sesi_pengganti`).
+    - `dilewati` hanya untuk sesi yang sudah mulai; menunda sesi mendatang lewat susun ulang.
+    - Status hanya bisa diubah sampai KONFIRMASI_BATAS_JAM setelah sesi berakhir (konfirmasi yang terlalu
+      lama cenderung tebakan — label dataset model personalisasi, docs/AI.md §2).
 
     Pemindahan dicek bentrok dengan kegiatan rutin, agenda, dan sesi lain (FR-5); jika bentrok,
-    dijawab 409 dengan daftar yang ditabrak dan sesi tidak diubah. Sesi `dilewati` adalah riwayat
-    dan tidak bisa diubah.
+    dijawab 409 dengan daftar yang ditabrak dan sesi tidak diubah. Sesi yang dipindah ditandai `dipindah`.
 
     Setiap kali status sesi diubah, status task-nya dihitung ulang (`perbarui_status_task`); hasilnya
     ada di `status_task` respons.
@@ -170,6 +182,17 @@ def ubah_sesi(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesi tidak ditemukan")
     if row.status == JADWAL_DILEWATI:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Sesi yang dilewati tidak bisa diubah")
+    sekarang = _sekarang()
+    terlewat = row.status == JADWAL_TIDAK_DIKETAHUI
+    if terlewat and (payload.waktu_mulai is not None or payload.status == JADWAL_TERJADWAL):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Sesi terlewat hanya bisa dikonfirmasi selesai atau dilewati")
+    if payload.status == JADWAL_DILEWATI and row.waktu_mulai > sekarang:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail="Sesi yang belum mulai tidak bisa ditandai dilewati; tunda lewat susun ulang")
+    if payload.status is not None and sekarang > row.waktu_selesai + timedelta(hours=settings.KONFIRMASI_BATAS_JAM):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail=f"Batas konfirmasi {settings.KONFIRMASI_BATAS_JAM} jam setelah sesi berakhir sudah lewat")
 
     if payload.waktu_mulai is not None:
         waktu = Interval(payload.waktu_mulai, payload.waktu_selesai)
@@ -192,8 +215,11 @@ def ubah_sesi(
                 },
             )
         row.waktu_mulai, row.waktu_selesai = waktu.start, waktu.end
+        row.dipindah = True
     if payload.status is not None:
         row.status = payload.status
+        if terlewat and payload.status == JADWAL_SELESAI:
+            hapus_sesi_pengganti(row.task, sekarang)
         perbarui_status_task(row.task)
 
     db.commit()
