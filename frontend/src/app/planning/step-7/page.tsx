@@ -4,8 +4,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+
 import DashboardLayout from "../../../components/DashboardLayout";
 import { useTasks } from "../../../context/TaskContext";
+import { savePlan, type SavedPlan } from "../../../lib/plans";
 
 export default function PlanningStep7() {
   const router = useRouter();
@@ -43,40 +45,78 @@ export default function PlanningStep7() {
     }
   }, []);
 
-  
-function handleSave() {
-  try {
-    // 1. Simpan refleksi ke browser
-    localStorage.setItem(
-      "gradatim-reflection",
-      reflection
-    );
+  function handleSave() {
+    try {
+      const savedDraft = sessionStorage.getItem(
+        "gradatim-planning-draft"
+      );
 
-    // 2. Tandai draft planning sebagai selesai
-    const savedDraft = sessionStorage.getItem(
-      "gradatim-planning-draft"
-    );
+      if (!savedDraft) {
+        alert(
+          "Data perencanaan tidak ditemukan. Mulai kembali dari Langkah 1."
+        );
+        return;
+      }
 
-    if (savedDraft) {
-      const draft = JSON.parse(savedDraft);
+      const draft: unknown = JSON.parse(savedDraft);
 
-      sessionStorage.setItem(
-        "gradatim-planning-draft",
-        JSON.stringify({
-          ...draft,
-          wizardCompleted: true,
-        })
+      if (
+        typeof draft !== "object" ||
+        draft === null ||
+        !("title" in draft) ||
+        typeof draft.title !== "string" ||
+        !draft.title.trim() ||
+        !("deadline" in draft) ||
+        typeof draft.deadline !== "string" ||
+        !draft.deadline ||
+        !("category" in draft) ||
+        typeof draft.category !== "string" ||
+        !draft.category ||
+        !("priority" in draft) ||
+        !["Low", "Medium", "High"].includes(
+          String(draft.priority)
+        )
+      ) {
+        alert("Data rencana belum lengkap.");
+        return;
+      }
+
+      const plan: SavedPlan = {
+        id: crypto.randomUUID(),
+        title: draft.title,
+        deadline: draft.deadline,
+        category: draft.category,
+        priority: draft.priority as SavedPlan["priority"],
+        reflection,
+        createdAt: new Date().toISOString(),
+        planningData: { ...draft },
+      };
+
+      // Simpan rencana baru ke localStorage
+      savePlan(plan);
+
+      // Simpan refleksi
+      localStorage.setItem(
+        "gradatim-reflection",
+        reflection
+      );
+
+      // Hapus draft setelah berhasil disimpan
+      sessionStorage.removeItem(
+        "gradatim-planning-draft"
+      );
+
+      setSaved(true);
+
+      // Kembali ke Dashboard
+      router.push("/");
+    } catch (error) {
+      console.error("Gagal menyimpan rencana:", error);
+      alert(
+        "Rencana gagal disimpan. Silakan coba lagi."
       );
     }
-
-    // 3. Kembali ke Dashboard
-    router.push("/");
-  } catch (error) {
-    console.error("Gagal menyimpan refleksi:", error);
-    alert("Refleksi gagal disimpan. Silakan coba lagi.");
   }
-}
-
 
   return (
     <DashboardLayout>
@@ -204,7 +244,7 @@ function handleSave() {
                 role="status"
                 className="mt-2 text-xs font-medium text-[#506851]"
               >
-                Refleksi berhasil disimpan di browser.
+                Rencana dan refleksi berhasil disimpan.
               </p>
             )}
           </div>
@@ -220,12 +260,12 @@ function handleSave() {
           </Link>
 
           <button
-  type="button"
-  onClick={handleSave}
-  className="rounded-lg bg-[#826049] px-6 py-3 text-sm font-medium text-white hover:bg-[#6D4D38]"
->
-  Simpan &amp; Selesai →
-</button>
+            type="button"
+            onClick={handleSave}
+            className="rounded-lg bg-[#826049] px-6 py-3 text-sm font-medium text-white hover:bg-[#6D4D38]"
+          >
+            Simpan &amp; Selesai →
+          </button>
         </div>
 
         <p className="mt-5 text-xs text-[#9A8F81]">

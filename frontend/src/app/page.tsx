@@ -1,12 +1,16 @@
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Bell, Plus, Search } from "lucide-react";
 
 import DashboardLayout from "../components/DashboardLayout";
 import { useTasks } from "../context/TaskContext";
+import {
+  getSavedPlans,
+  type SavedPlan,
+} from "../lib/plans";
 
 function dateKey(date: Date) {
   const year = date.getFullYear();
@@ -22,6 +26,11 @@ export default function Home() {
   const [newTask, setNewTask] = useState("");
   const [search, setSearch] = useState("");
   const [showAddTask, setShowAddTask] = useState(false);
+  const [savedPlans, setSavedPlans] = useState<SavedPlan[]>([]);
+
+  useEffect(() => {
+    setSavedPlans(getSavedPlans());
+  }, []);
 
   const completed = tasks.filter(
     (task) => task.completed
@@ -103,7 +112,7 @@ export default function Home() {
           </div>
         </header>
 
-        {/* WELCOME + CREATE PLAN BUTTON */}
+        {/* WELCOME */}
         <section className="mt-7">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -286,6 +295,79 @@ export default function Home() {
               Lihat Mingguan →
             </Link>
           </div>
+        </section>
+
+        {/* MY PLANS */}
+        <section className="mt-7">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold text-[#30312B]">
+                Rencana Saya
+              </h2>
+
+              <p className="mt-1 text-sm text-[#8B857B]">
+                Rencana yang sudah kamu buat melalui Planning Wizard.
+              </p>
+            </div>
+
+            <Link
+              href="/planning/step-1"
+              className="inline-flex items-center gap-2 rounded-lg bg-[#826049] px-4 py-3 text-sm font-medium text-white hover:bg-[#6D4D38]"
+            >
+              <Plus size={16} />
+              Rencana Baru
+            </Link>
+          </div>
+
+          {savedPlans.length === 0 ? (
+            <div className="mt-5 rounded-xl border border-dashed border-[#DCCDBB] bg-[#FFFCF7] px-6 py-10 text-center">
+              <p className="font-medium text-[#45453D]">
+                Belum ada rencana tersimpan
+              </p>
+
+              <p className="mt-2 text-sm text-[#8B857B]">
+                Klik Buat Rencana Baru untuk membuat rencana pertamamu.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              {savedPlans.map((plan) => (
+                <article
+                  key={plan.id}
+                  className="rounded-xl border border-[#E7DBCC] bg-[#FFFCF7] p-5"
+                >
+                  <span className="rounded-full bg-[#E5EBE0] px-3 py-1 text-xs font-medium text-[#506851]">
+                    {plan.category}
+                  </span>
+
+                  <h3 className="mt-4 text-lg font-semibold text-[#30312B]">
+                    {plan.title}
+                  </h3>
+
+                  <p className="mt-2 text-sm text-[#8B857B]">
+                    Deadline: {plan.deadline}
+                  </p>
+
+                  <p className="mt-1 text-sm text-[#8B857B]">
+                    Prioritas: {plan.priority}
+                  </p>
+
+                  {plan.reflection && (
+                    <p className="mt-4 break-words rounded-lg bg-[#F3EADD] p-3 text-sm text-[#57564F]">
+                      {plan.reflection}
+                    </p>
+                  )}
+
+                  <p className="mt-4 text-xs text-[#9A8F81]">
+                    Dibuat:{" "}
+                    {new Date(plan.createdAt).toLocaleDateString(
+                      "id-ID"
+                    )}
+                  </p>
+                </article>
+              ))}
+            </div>
+          )}
         </section>
       </div>
     </DashboardLayout>
