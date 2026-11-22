@@ -5,8 +5,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { ApiError } from "../lib/api/client";
 import { AuthProvider } from "../context/AuthContext";
-// Sementara: halaman yang belum tersambung ke API masih memakai data lokal ini.
-import { TaskProvider } from "../context/TaskContext";
 
 function buatQueryClient(): QueryClient {
   return new QueryClient({
@@ -33,9 +31,7 @@ export default function Providers({ children }: { children: ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <TaskProvider>{children}</TaskProvider>
-      </AuthProvider>
+      <AuthProvider>{children}</AuthProvider>
     </QueryClientProvider>
   );
 }
