@@ -1,5 +1,11 @@
 import type { ReactNode } from "react";
 
+export { inputClass, labelClass } from "./ui";
+import { primaryButtonClass as tombolUtama } from "./ui";
+
+/** Tombol utama selebar form. */
+export const primaryButtonClass = `w-full ${tombolUtama}`;
+
 /** Kerangka halaman login/register (tanpa sidebar), memakai palet dashboard. */
 export default function AuthShell({
   title,
@@ -30,14 +36,6 @@ export default function AuthShell({
     </div>
   );
 }
-
-export const inputClass =
-  "w-full rounded-lg border border-[#E5D9C9] bg-white px-4 py-3 text-sm outline-none focus:border-[#64765C]";
-
-export const labelClass = "mb-2 block text-sm font-semibold";
-
-export const primaryButtonClass =
-  "w-full rounded-lg bg-[#826049] px-6 py-3 text-sm font-medium text-white hover:bg-[#6D4D38] disabled:cursor-not-allowed disabled:opacity-60";
 
 /** Tujuan redirect setelah login: hanya path internal (cegah open redirect / `javascript:`). */
 export function tujuanAman(next: string | null): string {

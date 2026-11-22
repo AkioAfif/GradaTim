@@ -2,10 +2,7 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import {
-  ArrowLeft,
-  ArrowRight,
   Pencil,
   Plus,
   Trash2,
@@ -122,7 +119,7 @@ export default function TasksPage() {
         {/* PAGE HEADING */}
         <section className="mt-7">
           <p className="text-xs font-bold tracking-[0.12em] text-[#506851]">
-            LANGKAH 6 DARI 7
+            TUGAS
           </p>
 
           <h1 className="mt-3 text-3xl font-medium tracking-tight md:text-4xl">
@@ -293,26 +290,6 @@ export default function TasksPage() {
         )}
 
         
-{/* NAVIGATION */}
-<div className="mt-6 flex items-center justify-between gap-4">
-  <Link
-    href="/planning/step-5"
-    className="flex items-center gap-2 rounded-lg border border-[#DDD2C3] bg-[#ECE9E1] px-5 py-3 text-sm font-medium hover:bg-[#E2DDD3]"
-  >
-    <ArrowLeft size={16} />
-    Kembali
-  </Link>
-
-  <Link
-    href="/planning/step-7"
-    className="flex items-center gap-2 rounded-lg bg-[#826049] px-5 py-3 text-sm font-medium text-white hover:bg-[#6D4D38]"
-  >
-    Lanjut
-    <ArrowRight size={16} />
-  </Link>
-</div>
-
-
       {/* ADD / EDIT MODAL */}
       {isFormOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
