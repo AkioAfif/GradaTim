@@ -17,6 +17,7 @@ Keputusan desain: docs/KEPUTUSAN_DESAIN_PENJADWALAN.md
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+import random
 from typing import Iterable
 
 from sqlalchemy import select
@@ -216,7 +217,9 @@ def _selesai_prasyarat_luar(db: DbSession, id_tasks: set[int]) -> dict[int, date
     return akhir
 
 
-def jadwalkan_goal(db: DbSession, user: User, goal: Goal, sekarang: datetime) -> HasilPenjadwalan:
+def jadwalkan_goal(
+    db: DbSession, user: User, goal: Goal, sekarang: datetime, rng: random.Random | None = None
+) -> HasilPenjadwalan:
     """
     Jadwalkan task goal yang belum terjadwal ke slot luang minggu ini (FR-4, D5, D7) dan simpan
     sesinya ke jadwal_task berstatus `terjadwal`.
@@ -269,11 +272,13 @@ def jadwalkan_goal(db: DbSession, user: User, goal: Goal, sekarang: datetime) ->
         ],
         slot,
         existing_load=beban,
+        explore_rate=settings.EKSPLORASI_RASIO,
+        rng=rng,
     )
 
     sesi_baru = [
         JadwalTask(id_task=s.task_number, waktu_mulai=s.interval.start, waktu_selesai=s.interval.end,
-                   status=JADWAL_TERJADWAL)
+                   status=JADWAL_TERJADWAL, eksplorasi=s.task_number in hasil.explored)
         for s in hasil.sessions
     ]
     db.add_all(sesi_baru)

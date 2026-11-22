@@ -2,6 +2,7 @@
 
 from datetime import time
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -25,6 +26,10 @@ class Settings(BaseSettings):
 
     # Status sesi hanya boleh diubah sampai sekian jam setelah sesi berakhir (label dataset, docs/AI.md §2)
     KONFIRMASI_BATAS_JAM: int = 48
+
+    # Peluang tiap task ditempatkan di slot acak saat penjadwalan goal (eksplorasi, docs/AI.md §2).
+    # 0 = mati (default: tes & produksi). Dogfooding: 0.2, peserta diberi tahu secara umum.
+    EKSPLORASI_RASIO: float = Field(0.0, ge=0.0, le=1.0)
 
     # extra="ignore": variabel lama di .env (mis. OPENAI_API_KEY) tidak bikin crash
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

@@ -21,6 +21,7 @@ Semua waktu memakai datetime lokal (WIB) tanpa timezone.
 """
 
 import math
+import random
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
@@ -28,6 +29,7 @@ from typing import Iterable, Optional
 
 MIN_SESSION_MINUTES = 15  # sisa slot di bawah ini tidak dipakai (lihat §7 dokumen desain)
 DAILY_CAP_TOLERANCE = 1.2  # batas beban harian = rata-rata × toleransi (D5: merata, tidak dipenuhi)
+EXPLORE_STEP_MINUTES = 15  # posisi mulai acak untuk eksplorasi dipilih di kelipatan ini
 
 
 @dataclass(frozen=True)
@@ -207,6 +209,7 @@ class ScheduleResult:
     sessions: list[Session] = field(default_factory=list)
     unscheduled: list[int] = field(default_factory=list)  # task_number yang tidak muat
     daily_cap_minutes: int = 0
+    explored: list[int] = field(default_factory=list)  # task_number yang slotnya dipilih acak (eksplorasi)
 
     def daily_load(self) -> dict[date, int]:
         load: dict[date, int] = defaultdict(int)
@@ -276,12 +279,44 @@ def _plan_task(
     return pieces if remaining == 0 else None
 
 
+def _plan_random(
+    minutes: int,
+    ready_at: datetime,
+    free: list[Interval],
+    load: dict[date, int],
+    daily_cap: int,
+    rng: random.Random,
+) -> Optional[list[Interval]]:
+    """Eksplorasi (docs/AI.md §2): satu sesi utuh di posisi mulai acak — seragam di antara semua posisi
+    valid (kelipatan EXPLORE_STEP_MINUTES) yang tidak sebelum `ready_at`, muat di satu slot luang, dan
+    tidak melewati batas harian. None jika tidak ada posisi seperti itu."""
+    step = timedelta(minutes=EXPLORE_STEP_MINUTES)
+    durasi = timedelta(minutes=minutes)
+    candidates: list[datetime] = []
+    for slot in free:
+        start = max(slot.start, ready_at)
+        if start > slot.start:  # bulatkan ke atas ke kelipatan step
+            lewat = (start - datetime.combine(start.date(), time.min)) % step
+            if lewat:
+                start += step - lewat
+        while start + durasi <= slot.end:
+            if load.get(start.date(), 0) + minutes <= daily_cap:
+                candidates.append(start)
+            start += step
+    if not candidates:
+        return None
+    start = rng.choice(candidates)
+    return [Interval(start, start + durasi)]
+
+
 def _schedule_with_cap(
     ordered: list[TaskToSchedule],
     slots: list[Interval],
     daily_cap: int,
     min_session: int,
     existing_load: dict[date, int],
+    explore: frozenset[int] = frozenset(),
+    rng: Optional[random.Random] = None,
 ) -> ScheduleResult:
     free = list(slots)
     load: dict[date, int] = defaultdict(int, existing_load)
@@ -295,7 +330,13 @@ def _schedule_with_cap(
             result.unscheduled.append(task.task_number)
             continue
         ready_at = max([finished_at[d] for d in deps] + [task.earliest or datetime.min])
-        pieces = _plan_task(task.minutes, ready_at, free, load, daily_cap, min_session)
+        pieces = None
+        if task.task_number in explore:
+            pieces = _plan_random(task.minutes, ready_at, free, load, daily_cap, rng)
+            if pieces is not None:
+                result.explored.append(task.task_number)
+        if pieces is None:  # bukan eksplorasi, atau tidak ada posisi acak yang muat utuh → cara biasa
+            pieces = _plan_task(task.minutes, ready_at, free, load, daily_cap, min_session)
         if pieces is None:
             result.unscheduled.append(task.task_number)
             continue
@@ -314,9 +355,17 @@ def schedule_tasks(
     slots: Iterable[Interval],
     min_session: int = MIN_SESSION_MINUTES,
     existing_load: Optional[dict[date, int]] = None,
+    explore_rate: float = 0.0,
+    rng: Optional[random.Random] = None,
 ) -> ScheduleResult:
     """
     Tempatkan task ke slot luang (hasil free_slots) secara otomatis — FR-4.
+
+    explore_rate: peluang tiap task ditempatkan di posisi acak, bukan slot paling awal (eksplorasi
+        untuk data model personalisasi, docs/AI.md §2). Hanya task tanpa penerus di daftar ini
+        (supaya penerusnya tidak terdorong sampai tidak muat). Batasan lain tetap berlaku; jika tidak
+        ada posisi acak yang muat utuh, task dijadwalkan cara biasa. Hasilnya di `explored`.
+    rng: sumber acak (untuk tes); default random.Random() baru.
 
     existing_load: menit yang sudah terpakai per hari oleh sesi lain (goal lain / sesi yang tidak
         ikut dijadwalkan ulang). Ikut dihitung dalam batas beban harian agar hari yang sudah
@@ -349,8 +398,19 @@ def schedule_tasks(
     # setiap task dipotong-potong karena rata-rata hariannya kecil
     cap = max(math.ceil(total / len(days) * DAILY_CAP_TOLERANCE), max(t.minutes for t in ordered))
 
+    explore: frozenset[int] = frozenset()
+    seed = 0.0
+    if explore_rate > 0:
+        rng = rng or random.Random()
+        has_successor = {d for t in ordered for d in t.depends_on}
+        explore = frozenset(
+            t.task_number for t in ordered if t.task_number not in has_successor and rng.random() < explore_rate
+        )
+        seed = rng.random()
+
     while True:
-        result = _schedule_with_cap(ordered, slots, cap, min_session, existing_load)
+        # sumber acak yang sama di tiap percobaan batas harian → pilihan posisi konsisten
+        result = _schedule_with_cap(ordered, slots, cap, min_session, existing_load, explore, random.Random(seed))
         if not result.unscheduled or cap >= max_day_free:
             break
         cap = min(max_day_free, cap + min_session)
