@@ -46,6 +46,10 @@ export default function HasilSusunUlang({
               <li key={t.id_task}>{t.nama_task}</li>
             ))}
           </ul>
+          <p className="mt-2">
+            Task ini tidak hilang, tapi untuk sementara tidak punya sesi. Jadwalkan lagi lewat tombol
+            &quot;Jadwalkan&quot; di halaman goal-nya saat ada slot kosong, atau minggu depan.
+          </p>
         </div>
       )}
 

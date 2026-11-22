@@ -7,6 +7,7 @@ import {
   House,
   ListTodo,
   CalendarDays,
+  Smile,
   ChartNoAxesColumn,
   Settings,
   LogOut,
@@ -18,6 +19,7 @@ const menuItems = [
   { label: "Beranda", href: "/", icon: House },
   { label: "Tugas", href: "/tasks", icon: ListTodo },
   { label: "Kalender", href: "/calendar", icon: CalendarDays },
+  { label: "Mood", href: "/mood", icon: Smile },
   { label: "Analitik", href: "/analytics", icon: ChartNoAxesColumn },
   { label: "Pengaturan", href: "/settings", icon: Settings },
 ];
