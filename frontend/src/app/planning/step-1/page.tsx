@@ -5,6 +5,7 @@ import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "../../../components/DashboardLayout";
+import UserAvatar from "../../../components/UserAvatar";
 import type { Task } from "../../../context/TaskContext";
 
 export default function PlanningStep1() {
@@ -42,9 +43,7 @@ function handleSubmit(event: FormEvent<HTMLFormElement>) {
           <p className="text-xs text-[#8B857B]">
             Perencanaan / Detail Tugas
           </p>
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#D7B99B] text-sm text-white">
-            A
-          </div>
+          <UserAvatar />
         </header>
 
         <section className="mt-7">

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Bell, Plus, Search } from "lucide-react";
 
 import DashboardLayout from "../components/DashboardLayout";
+import UserAvatar from "../components/UserAvatar";
 import { useTasks } from "../context/TaskContext";
 
 function dateKey(date: Date) {
@@ -97,9 +98,7 @@ export default function Home() {
           <div className="flex items-center gap-5">
             <Bell size={17} className="text-[#8B857B]" />
 
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#D7B99B] text-sm font-medium text-white">
-              A
-            </div>
+            <UserAvatar />
           </div>
         </header>
 

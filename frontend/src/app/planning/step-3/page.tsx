@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import DashboardLayout from "../../../components/DashboardLayout";
+import UserAvatar from "../../../components/UserAvatar";
 
 type Tab = "Overview" | "Task List" | "Schedule" | "Review";
 
@@ -133,9 +134,7 @@ export default function PlanningStep3() {
             AI Planning / Sprint Breakdown
           </p>
 
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#D7B99B] text-sm text-white">
-            A
-          </div>
+          <UserAvatar />
         </header>
 
         {/* TITLE */}

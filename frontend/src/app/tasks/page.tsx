@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import DashboardLayout from "../../components/DashboardLayout";
+import UserAvatar from "../../components/UserAvatar";
 import { useTasks, type Task } from "../../context/TaskContext";
 
 type Priority = Task["priority"];
@@ -115,9 +116,7 @@ export default function TasksPage() {
             Task Management
           </p>
 
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#D7B99B] text-sm font-medium text-white">
-            A
-          </div>
+          <UserAvatar />
         </header>
 
         {/* PAGE HEADING */}

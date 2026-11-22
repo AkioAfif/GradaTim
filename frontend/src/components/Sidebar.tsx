@@ -12,6 +12,8 @@ import {
   LogOut,
 } from "lucide-react";
 
+import { useAuth } from "../context/AuthContext";
+
 const menuItems = [
   { label: "Beranda", href: "/", icon: House },
   { label: "Tugas", href: "/tasks", icon: ListTodo },
@@ -22,6 +24,8 @@ const menuItems = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  // Redirect ke /login dilakukan DashboardLayout begitu status menjadi unauthenticated.
+  const { logout } = useAuth();
 
   return (
     <aside className="flex w-44 shrink-0 flex-col border-r border-[#E9E0D4] bg-[#F4F0E7] px-4 py-6 md:min-h-screen">
@@ -58,9 +62,8 @@ export default function Sidebar() {
       <div className="mt-auto pt-10">
         <button
           type="button"
-          disabled
-          title="Logout tersedia setelah integrasi autentikasi"
-          className="flex w-full cursor-not-allowed items-center gap-2 rounded-lg bg-[#E5E8DC] px-3 py-2.5 text-xs text-[#506851] opacity-75"
+          onClick={logout}
+          className="flex w-full items-center gap-2 rounded-lg bg-[#E5E8DC] px-3 py-2.5 text-xs text-[#506851] hover:bg-[#D9DECD]"
         >
           <LogOut size={15} />
           Keluar

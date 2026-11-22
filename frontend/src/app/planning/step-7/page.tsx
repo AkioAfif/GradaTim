@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "../../../components/DashboardLayout";
+import UserAvatar from "../../../components/UserAvatar";
 import { useTasks } from "../../../context/TaskContext";
 
 export default function PlanningStep7() {
@@ -87,9 +88,7 @@ function handleSave() {
             Progress Tracking
           </p>
 
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#D7B99B] text-sm text-white">
-            A
-          </div>
+          <UserAvatar />
         </header>
 
         {/* TITLE */}

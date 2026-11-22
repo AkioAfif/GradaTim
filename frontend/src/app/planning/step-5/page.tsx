@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "../../../components/DashboardLayout";
+import UserAvatar from "../../../components/UserAvatar";
 
 type EnergyLevel = "Low" | "Medium" | "High";
 
@@ -118,9 +119,7 @@ export default function PlanningStep5() {
             Planning Parameters
           </p>
 
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#D7B99B] text-sm text-white">
-            A
-          </div>
+          <UserAvatar />
         </header>
 
         {/* PAGE TITLE */}
