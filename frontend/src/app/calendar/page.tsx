@@ -2,12 +2,13 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, CalendarPlus, ChevronLeft, ChevronRight, RefreshCw, Trash2 } from "lucide-react";
+import { CalendarPlus, ChevronLeft, ChevronRight, RefreshCw, Trash2 } from "lucide-react";
 
 import DashboardLayout from "../../components/DashboardLayout";
 import UserAvatar from "../../components/UserAvatar";
 import AgendaModal from "../../components/jadwal/AgendaModal";
 import HasilSusunUlang from "../../components/jadwal/HasilSusunUlang";
+import KotakPerluKonfirmasi from "../../components/jadwal/KotakPerluKonfirmasi";
 import SesiCard, { gayaSesi } from "../../components/jadwal/SesiCard";
 import { useSekarang, useSusunUlang } from "../../components/jadwal/hooks";
 import { cardClass, errorBoxClass, secondaryButtonClass } from "../../components/ui";
@@ -436,19 +437,9 @@ export default function CalendarPage() {
         )}
 
         {perluKonfirmasi.length > 0 && (
-          <section className="mt-5 rounded-xl border-2 border-[#D9A441] bg-[#FFF8EA] p-5">
-            <h2 className="flex items-center gap-2 text-base font-semibold text-[#6B4E12]">
-              <AlertCircle size={18} /> {perluKonfirmasi.length} sesi perlu dikonfirmasi
-            </h2>
-            <p className="mt-1 text-sm text-[#7A5A1E]">
-              Apakah sesi ini kamu kerjakan? Konfirmasi bisa sampai 48 jam setelah sesi berakhir.
-            </p>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {perluKonfirmasi.map((s) => (
-                <SesiCard key={s.id_jadwal} sesi={s} sekarang={sekarang} tampilTanggal />
-              ))}
-            </div>
-          </section>
+          <div className="mt-5">
+            <KotakPerluKonfirmasi sesi={perluKonfirmasi} sekarang={sekarang} />
+          </div>
         )}
 
         {jadwal.isPending ? (

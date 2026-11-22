@@ -3,7 +3,7 @@
 // menolaknya, tapi label "selesai" untuk sesi yang belum terjadi akan mengotori dataset model).
 
 import type { SesiRead } from "./api/types";
-import { KONFIRMASI_BATAS_JAM, parseWib } from "./waktu";
+import { KONFIRMASI_BATAS_JAM, parseWib, tanggalDari } from "./waktu";
 
 export type AksiSesi = {
   /** Tombol Selesai / Tidak dikerjakan (status selesai | dilewati). */
@@ -50,6 +50,37 @@ export function aksiSesi(sesi: Pick<SesiRead, "status" | "waktu_mulai" | "waktu_
       // dilewati = riwayat, tidak bisa diubah
       return kosong;
   }
+}
+
+type SesiWaktu = Pick<SesiRead, "status" | "waktu_mulai" | "waktu_selesai">;
+
+/** Sesi pada tanggal tertentu (menurut waktu mulai), urut waktu mulai. */
+export function sesiPadaTanggal<T extends SesiWaktu>(sesi: T[], tanggal: string): T[] {
+  return sesi
+    .filter((s) => tanggalDari(s.waktu_mulai) === tanggal)
+    .sort((a, b) => a.waktu_mulai.localeCompare(b.waktu_mulai));
+}
+
+/**
+ * Sesi terjadwal pertama hari ini yang belum mulai. Mood sebaiknya diisi sebelum sesi ini:
+ * mood yang diisi setelah sesi mulai tidak dipakai sebagai fitur sesi itu (docs/AI.md §2).
+ */
+export function sesiBerikutnyaHariIni<T extends SesiWaktu>(sesi: T[], tanggal: string, sekarang: Date): T | null {
+  return (
+    sesiPadaTanggal(sesi, tanggal).find(
+      (s) => s.status === "terjadwal" && parseWib(s.waktu_mulai).getTime() > sekarang.getTime()
+    ) ?? null
+  );
+}
+
+export type RingkasanHari = { tanggal: string; total: number; selesai: number };
+
+/** Jumlah sesi & sesi selesai per hari untuk 7 tanggal yang diberikan. */
+export function ringkasanPerHari(sesi: SesiWaktu[], tanggal: string[]): RingkasanHari[] {
+  return tanggal.map((t) => {
+    const hari = sesi.filter((s) => tanggalDari(s.waktu_mulai) === t);
+    return { tanggal: t, total: hari.length, selesai: hari.filter((s) => s.status === "selesai").length };
+  });
 }
 
 /** Sesi yang perlu dikonfirmasi user, urut waktu mulai. */

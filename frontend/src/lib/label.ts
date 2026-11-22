@@ -20,6 +20,12 @@ export function labelStatusTask(status: string): string {
   return LABEL_STATUS_TASK[status as TaskStatus] ?? status;
 }
 
+export const LABEL_KAPASITAS: Record<string, string> = {
+  LOW: "Rendah",
+  MEDIUM: "Sedang",
+  HIGH: "Tinggi",
+};
+
 export const LABEL_STATUS_SESI: Record<StatusSesi, string> = {
   terjadwal: "Terjadwal",
   selesai: "Selesai",

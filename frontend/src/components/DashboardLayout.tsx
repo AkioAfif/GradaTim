@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 
 import Sidebar from "./Sidebar";
 import { useAuth } from "../context/AuthContext";
+import { useSusunUlangOtomatis } from "./jadwal/useSusunUlangOtomatis";
 
 /** Layout halaman dashboard. Sekaligus guard auth: tanpa login → /login?next=<halaman ini>. */
 export default function DashboardLayout({
@@ -16,6 +17,7 @@ export default function DashboardLayout({
   const { status, errorMessage, keluarManual, retry, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  useSusunUlangOtomatis();
 
   useEffect(() => {
     if (status === "unauthenticated") {
