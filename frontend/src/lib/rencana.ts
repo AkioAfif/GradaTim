@@ -1,7 +1,7 @@
 // Logika murni seputar rencana goal (tanpa React) — bisa diuji langsung.
 
 import type { MilestoneRead, TimeConstraintRead } from "./api/types";
-import { awalMinggu, jamKeMenit, tanggalDari } from "./waktu";
+import { awalMinggu, hariDalamMinggu, jamKeMenit, tambahHari, tanggalDari } from "./waktu";
 
 // Batas menit_harian di backend (goal_service.MENIT_HARIAN_MIN/MAKS, schema DecomposeRequest).
 export const MENIT_HARIAN_MIN = 15;
@@ -62,6 +62,38 @@ export function mingguanPada(milestones: MilestoneRead[], tanggal: string): Mile
       (m) => m.tipe === "mingguan" && m.deadline != null && awalMinggu(tanggalDari(m.deadline)) === senin
     ) ?? null
   );
+}
+
+export type StatusRinci = {
+  /** Milestone mingguan minggu ini (null = goal belum direncanakan / di luar rentang goal). */
+  ini: MilestoneRead | null;
+  /** Minggu ini punya target tapi belum ada task → tawarkan "Rinci minggu ini". */
+  iniPerluDirinci: boolean;
+  /** Milestone mingguan minggu depan (null = minggu depan di luar rentang goal). */
+  depan: MilestoneRead | null;
+  /** Minggu depan sudah punya task. */
+  depanSudahDirinci: boolean;
+  /** Backend hanya mengizinkan rinci minggu depan mulai Sabtu (WIB). */
+  depanBolehSekarang: boolean;
+};
+
+/** Status rincian task minggu ini & depan untuk tombol di halaman goal (D11). */
+export function statusRinci(milestones: MilestoneRead[], hariIni: string): StatusRinci {
+  const ini = mingguanPada(milestones, hariIni);
+  const depan = mingguanPada(milestones, tambahHari(hariIni, 7));
+  return {
+    ini,
+    iniPerluDirinci: ini !== null && ini.tasks.length === 0,
+    depan,
+    depanSudahDirinci: depan !== null && depan.tasks.length > 0,
+    depanBolehSekarang: hariDalamMinggu(hariIni) >= 5,
+  };
+}
+
+/** Jumlah task selesai / total dari semua milestone. */
+export function progresTask(milestones: MilestoneRead[]): { selesai: number; total: number } {
+  const tasks = milestones.flatMap((m) => m.tasks);
+  return { selesai: tasks.filter((t) => t.status === "done").length, total: tasks.length };
 }
 
 /** Jumlah task (termasuk semua minggu) dalam satu daftar milestone. */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -9,6 +9,7 @@ import { Sparkles } from "lucide-react";
 import DashboardLayout from "../../../components/DashboardLayout";
 import EstimasiWaktuLuang, { useEstimasiWaktuLuang } from "../../../components/planning/EstimasiWaktuLuang";
 import WizardHeader from "../../../components/planning/WizardHeader";
+import { useCegahTutupTab, useDetikBerjalan } from "../../../components/useProsesLama";
 import { useGoalWizard } from "../../../components/planning/useGoalWizard";
 import {
   cardClass,
@@ -27,31 +28,6 @@ import { invalidateGoals, invalidateJadwal, queryKeys } from "../../../lib/api/q
 import type { GoalDetail } from "../../../lib/api/types";
 import { MENIT_HARIAN_MAKS, MENIT_HARIAN_MIN, jumlahTask } from "../../../lib/rencana";
 import { formatTanggal } from "../../../lib/waktu";
-
-/** Detik sejak `aktif` menjadi true (untuk indikator proses AI yang lama). */
-function useDetikBerjalan(aktif: boolean): number {
-  const [detik, setDetik] = useState(0);
-  useEffect(() => {
-    if (!aktif) return;
-    const mulai = Date.now();
-    const timer = setInterval(() => setDetik(Math.floor((Date.now() - mulai) / 1000)), 1000);
-    return () => {
-      clearInterval(timer);
-      setDetik(0);
-    };
-  }, [aktif]);
-  return detik;
-}
-
-/** Peringatan browser bila tab ditutup saat proses AI berjalan. */
-function useCegahTutupTab(aktif: boolean) {
-  useEffect(() => {
-    if (!aktif) return;
-    const handler = (event: BeforeUnloadEvent) => event.preventDefault();
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [aktif]);
-}
 
 function petunjuk(error: ApiError): string | null {
   if (error.status === 422) return "Periksa deadline goal (langkah 1) atau waktu harianmu.";

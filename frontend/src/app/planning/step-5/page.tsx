@@ -70,7 +70,25 @@ export default function PlanningStep5() {
 
           <div className="mt-6">
             {jadwalkan.isSuccess ? (
-              <HasilPenjadwalan sesiBaru={jadwalkan.data.sesi_baru} tidakMuat={jadwalkan.data.tidak_muat} />
+              <>
+                <HasilPenjadwalan sesiBaru={jadwalkan.data.sesi_baru} tidakMuat={jadwalkan.data.tidak_muat} />
+                {idGoal !== null && (
+                  <p className="mt-4 text-sm text-[#64675E]">
+                    Rinci task minggu berikutnya kapan saja dari{" "}
+                    <Link
+                      href={`/goals/${idGoal}`}
+                      onClick={() => {
+                        setSelesaiDitekan(true);
+                        clearIdGoalWizard();
+                      }}
+                      className="font-medium text-[#506851] underline"
+                    >
+                      halaman goal
+                    </Link>
+                    .
+                  </p>
+                )}
+              </>
             ) : (
               <button
                 type="button"
