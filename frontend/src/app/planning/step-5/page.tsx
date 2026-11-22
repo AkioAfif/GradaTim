@@ -1,281 +1,124 @@
-
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import DashboardLayout from "../../../components/DashboardLayout";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-type EnergyLevel = "Low" | "Medium" | "High";
+import DashboardLayout from "../../../components/DashboardLayout";
+import HasilPenjadwalan from "../../../components/jadwal/HasilPenjadwalan";
+import WizardHeader from "../../../components/planning/WizardHeader";
+import { useGoalWizard } from "../../../components/planning/useGoalWizard";
+import {
+  cardClass,
+  errorBoxClass,
+  primaryButtonClass,
+  secondaryButtonClass,
+} from "../../../components/ui";
+import { toApiError, type ApiError } from "../../../lib/api/client";
+import { jadwalkanGoal } from "../../../lib/api/jadwal";
+import { invalidateJadwal } from "../../../lib/api/queries";
+import type { HasilPenjadwalanRead } from "../../../lib/api/types";
+import { clearIdGoalWizard } from "../../../lib/planning";
 
 export default function PlanningStep5() {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const [selesaiDitekan, setSelesaiDitekan] = useState(false);
+  const { idGoal, goal } = useGoalWizard({ selesai: selesaiDitekan });
 
-  const [sprintDuration, setSprintDuration] = useState("2");
-  const [blockedStart, setBlockedStart] = useState("");
-  const [blockedEnd, setBlockedEnd] = useState("");
-  const [energyLevel, setEnergyLevel] =
-    useState<EnergyLevel>("Medium");
-  const [error, setError] = useState("");
-
-  // Membaca data yang pernah disimpan saat kembali ke halaman ini.
-  useEffect(() => {
-    try {
-      const saved = sessionStorage.getItem(
-        "gradatim-planning-draft"
-      );
-
-      if (!saved) return;
-
-      const draft = JSON.parse(saved);
-
-      if (typeof draft.sprintDuration === "string") {
-        setSprintDuration(draft.sprintDuration);
+  const jadwalkan = useMutation<HasilPenjadwalanRead, ApiError>({
+    mutationFn: async () => {
+      try {
+        return await jadwalkanGoal(idGoal as number);
+      } catch (err) {
+        throw toApiError(err);
       }
+    },
+    onSuccess: () => invalidateJadwal(queryClient),
+  });
 
-      if (typeof draft.blockedStart === "string") {
-        setBlockedStart(draft.blockedStart);
-      }
-
-      if (typeof draft.blockedEnd === "string") {
-        setBlockedEnd(draft.blockedEnd);
-      }
-
-      if (
-        draft.energyLevel === "Low" ||
-        draft.energyLevel === "Medium" ||
-        draft.energyLevel === "High"
-      ) {
-        setEnergyLevel(draft.energyLevel);
-      }
-    } catch (error) {
-      console.error("Gagal membaca draft:", error);
-    }
-  }, []);
-
-  function handleNext() {
-    setError("");
-
-    if (blockedStart && !blockedEnd) {
-      setError("Isi tanggal selesai untuk Blocked Periods.");
-      return;
-    }
-
-    if (!blockedStart && blockedEnd) {
-      setError("Isi tanggal mulai untuk Blocked Periods.");
-      return;
-    }
-
-    if (
-      blockedStart &&
-      blockedEnd &&
-      blockedEnd < blockedStart
-    ) {
-      setError(
-        "Tanggal selesai tidak boleh lebih awal dari tanggal mulai."
-      );
-      return;
-    }
-
-    try {
-      const saved = sessionStorage.getItem(
-        "gradatim-planning-draft"
-      );
-
-      if (!saved) {
-        setError(
-          "Draft belum ditemukan. Isi Langkah 1 terlebih dahulu."
-        );
-        return;
-      }
-
-      const draft = JSON.parse(saved);
-
-      sessionStorage.setItem(
-        "gradatim-planning-draft",
-        JSON.stringify({
-          ...draft,
-          sprintDuration,
-          blockedStart,
-          blockedEnd,
-          energyLevel,
-        })
-      );
-
-      router.push("/tasks");
-    } catch (error) {
-      console.error("Gagal menyimpan parameter:", error);
-      setError("Terjadi kesalahan saat menyimpan parameter.");
-    }
+  function selesai() {
+    // dalam satu event handler: render berikutnya sudah membawa selesai=true, jadi hook tidak
+    // sempat mengalihkan ke langkah 1 saat id_goal dihapus
+    setSelesaiDitekan(true);
+    clearIdGoalWizard();
+    router.push("/calendar");
   }
 
   return (
     <DashboardLayout>
       <div className="mx-auto max-w-5xl">
-        {/* HEADER */}
-        <header className="flex items-center justify-between border-b border-[#E9E0D4] pb-5">
-          <p className="text-xs text-[#8B857B]">
-            Planning Parameters
-          </p>
+        <WizardHeader
+          langkah={5}
+          judul="Jadwalkan Minggu Ini"
+          subjudul="Task minggu ini ditempatkan otomatis di slot kosong kalendermu, di luar kegiatan rutin dan agenda."
+        />
 
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#D7B99B] text-sm text-white">
-            A
-          </div>
-        </header>
+        <section className={`mt-7 ${cardClass}`}>
+          {goal.data && (
+            <p className="text-sm text-[#64675E]">
+              Goal: <strong>{goal.data.judul_goal}</strong>
+            </p>
+          )}
 
-        {/* PAGE TITLE */}
-        <section className="mt-7">
-          <p className="text-xs font-bold tracking-[0.12em] text-[#506851]">
-            LANGKAH 5 DARI 7
-          </p>
+          <ul className="mt-4 list-disc space-y-1.5 pl-5 text-sm text-[#64675E]">
+            <li>Hanya task minggu ini yang dijadwalkan. Task minggu berikutnya dirinci dan dijadwalkan saat minggunya tiba.</li>
+            <li>Setelah sesi berlangsung, tandai <strong>Selesai</strong> atau <strong>Tidak dikerjakan</strong> di kalender (maksimal 48 jam setelah sesi berakhir).</li>
+            <li>Sebagian sesi dapat ditempatkan di waktu acak untuk keperluan riset personalisasi jadwal.</li>
+          </ul>
 
-          <h1 className="mt-3 text-3xl font-medium tracking-tight md:text-4xl">
-            Atur Parameter Rencana
-          </h1>
-
-          <p className="mt-3 text-sm text-[#8B857B]">
-            Sesuaikan durasi, waktu yang tersedia, dan energimu.
-          </p>
-        </section>
-
-        {/* PARAMETER FORM */}
-        <section className="mt-7 rounded-xl border border-[#E7DBCC] bg-[#FFFCF7] p-5 sm:p-7">
-          {/* SPRINT DURATION */}
-          <div>
-            <label
-              htmlFor="sprint-duration"
-              className="mb-2 block text-sm font-semibold"
-            >
-              Sprint Duration
-            </label>
-
-            <select
-              id="sprint-duration"
-              value={sprintDuration}
-              onChange={(event) =>
-                setSprintDuration(event.target.value)
-              }
-              className="w-full rounded-lg border border-[#E5D9C9] bg-white px-4 py-3 text-sm outline-none focus:border-[#64765C]"
-            >
-              <option value="1">1 week</option>
-              <option value="2">2 weeks</option>
-              <option value="3">3 weeks</option>
-              <option value="4">4 weeks</option>
-            </select>
-          </div>
-
-          {/* BLOCKED PERIODS */}
           <div className="mt-6">
-            <p className="mb-2 text-sm font-semibold">
-              Blocked Periods
-            </p>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label
-                  htmlFor="blocked-start"
-                  className="mb-2 block text-xs text-[#8B857B]"
-                >
-                  Mulai
-                </label>
-
-                <input
-                  id="blocked-start"
-                  type="date"
-                  value={blockedStart}
-                  onChange={(event) =>
-                    setBlockedStart(event.target.value)
-                  }
-                  className="w-full rounded-lg border border-[#E5D9C9] bg-white px-4 py-3 text-sm outline-none focus:border-[#64765C]"
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="blocked-end"
-                  className="mb-2 block text-xs text-[#8B857B]"
-                >
-                  Selesai
-                </label>
-
-                <input
-                  id="blocked-end"
-                  type="date"
-                  min={blockedStart || undefined}
-                  value={blockedEnd}
-                  onChange={(event) =>
-                    setBlockedEnd(event.target.value)
-                  }
-                  className="w-full rounded-lg border border-[#E5D9C9] bg-white px-4 py-3 text-sm outline-none focus:border-[#64765C]"
-                />
-              </div>
-            </div>
-
-            <p className="mt-2 text-xs text-[#8B857B]">
-              Opsional. Isi jika ada periode ketika kamu
-              tidak bisa menjalankan rencana.
-            </p>
+            {jadwalkan.isSuccess ? (
+              <>
+                <HasilPenjadwalan sesiBaru={jadwalkan.data.sesi_baru} tidakMuat={jadwalkan.data.tidak_muat} />
+                {idGoal !== null && (
+                  <p className="mt-4 text-sm text-[#64675E]">
+                    Rinci task minggu berikutnya kapan saja dari{" "}
+                    <Link
+                      href={`/goals/${idGoal}`}
+                      onClick={() => {
+                        setSelesaiDitekan(true);
+                        clearIdGoalWizard();
+                      }}
+                      className="font-medium text-[#506851] underline"
+                    >
+                      halaman goal
+                    </Link>
+                    .
+                  </p>
+                )}
+              </>
+            ) : (
+              <button
+                type="button"
+                disabled={jadwalkan.isPending || idGoal === null}
+                onClick={() => jadwalkan.mutate()}
+                className={primaryButtonClass}
+              >
+                {jadwalkan.isPending ? "Menjadwalkan..." : "Jadwalkan sekarang"}
+              </button>
+            )}
           </div>
 
-          {/* ENERGY LEVEL */}
-          <fieldset className="mt-7">
-            <legend className="mb-3 text-sm font-semibold">
-              Energy Level
-            </legend>
-
-            <div className="flex flex-wrap gap-3">
-              {(["Low", "Medium", "High"] as const).map(
-                (level) => (
-                  <label
-                    key={level}
-                    className={`cursor-pointer rounded-full px-5 py-2 text-sm transition ${
-                      energyLevel === level
-                        ? "bg-[#F0C4A4] text-[#45382E]"
-                        : "bg-[#ECE9E1] text-[#57564F] hover:bg-[#E2DDD3]"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="energy-level"
-                      value={level}
-                      checked={energyLevel === level}
-                      onChange={() => setEnergyLevel(level)}
-                      className="mr-2 accent-[#826049]"
-                    />
-
-                    {level}
-                  </label>
-                )
-              )}
-            </div>
-          </fieldset>
+          {jadwalkan.isError && (
+            <p role="alert" className={`mt-4 ${errorBoxClass}`}>
+              {jadwalkan.error.message}
+            </p>
+          )}
         </section>
 
-        {/* ERROR MESSAGE */}
-        {error && (
-          <p
-            role="alert"
-            className="mt-4 text-sm text-red-700"
-          >
-            {error}
-          </p>
-        )}
-
-        {/* NAVIGATION */}
-        <div className="mt-5 flex items-center justify-between gap-4">
-          <Link
-            href="/planning/step-4"
-            className="rounded-lg border border-[#DDD2C3] bg-[#ECE9E1] px-5 py-3 text-sm font-medium"
-          >
+        <div className="mt-8 flex flex-wrap items-center justify-between gap-4">
+          <Link href="/planning/step-4" className={secondaryButtonClass}>
             ← Kembali
           </Link>
-
           <button
             type="button"
-            onClick={handleNext}
-            className="rounded-lg bg-[#826049] px-6 py-3 text-sm font-medium text-white hover:bg-[#6D4D38]"
+            disabled={!jadwalkan.isSuccess}
+            onClick={selesai}
+            className={primaryButtonClass}
           >
-            Lanjut →
+            Selesai, lihat kalender →
           </button>
         </div>
       </div>

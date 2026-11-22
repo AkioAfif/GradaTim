@@ -1,6 +1,6 @@
 
 import type { Metadata } from "next";
-import { TaskProvider } from "../context/TaskContext";
+import Providers from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,7 +16,7 @@ export default function RootLayout({
   return (
     <html lang="id">
       <body>
-        <TaskProvider>{children}</TaskProvider>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );
