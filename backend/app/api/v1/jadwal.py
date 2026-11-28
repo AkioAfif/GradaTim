@@ -162,7 +162,8 @@ def ubah_sesi(
     - Sesi `tidak_diketahui` (terlewat tanpa konfirmasi) hanya bisa dikonfirmasi `selesai`/`dilewati`,
       tidak bisa dipindah. Jika dikonfirmasi `selesai` dan menitnya sudah memenuhi durasi task, sesi
       pengganti buatan susun ulang yang belum mulai dihapus (`hapus_sesi_pengganti`).
-    - `dilewati` hanya untuk sesi yang sudah mulai; menunda sesi mendatang lewat susun ulang.
+    - `selesai`/`dilewati` hanya untuk sesi yang sudah mulai (label dataset harus mencerminkan sesi yang
+      benar-benar terjadi); menunda sesi mendatang lewat susun ulang.
     - Status hanya bisa diubah sampai KONFIRMASI_BATAS_JAM setelah sesi berakhir (konfirmasi yang terlalu
       lama cenderung tebakan — label dataset model personalisasi, docs/AI.md §2).
 
@@ -188,9 +189,9 @@ def ubah_sesi(
     if terlewat and (payload.waktu_mulai is not None or payload.status == JADWAL_TERJADWAL):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                             detail="Sesi terlewat hanya bisa dikonfirmasi selesai atau dilewati")
-    if payload.status == JADWAL_DILEWATI and row.waktu_mulai > sekarang:
+    if payload.status in (JADWAL_SELESAI, JADWAL_DILEWATI) and row.waktu_mulai > sekarang:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                            detail="Sesi yang belum mulai tidak bisa ditandai dilewati; tunda lewat susun ulang")
+                            detail="Sesi yang belum mulai belum bisa dikonfirmasi; tunda lewat susun ulang")
     if payload.status is not None and sekarang > row.waktu_selesai + timedelta(hours=settings.KONFIRMASI_BATAS_JAM):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT,
                             detail=f"Batas konfirmasi {settings.KONFIRMASI_BATAS_JAM} jam setelah sesi berakhir sudah lewat")

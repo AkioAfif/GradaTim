@@ -539,11 +539,16 @@ def test_tandai_dilewati_sesi_yang_sudah_mulai(client, db, data):
     assert res.status_code == 200 and res.json()["status"] == JADWAL_DILEWATI
 
 
-def test_tandai_dilewati_sesi_belum_mulai_ditolak(client, db, data, monkeypatch):
+@pytest.mark.parametrize("status_baru", ["dilewati", "selesai"])
+def test_konfirmasi_sesi_belum_mulai_ditolak(client, db, data, monkeypatch, status_baru):
+    """Label dataset hanya untuk sesi yang benar-benar terjadi: selesai/dilewati baru boleh setelah sesi mulai."""
     user, _, (_, b) = data
     atur_sekarang(monkeypatch, dt(7, 8))
-    res = client.patch(f"{URL}/sesi/{sesi_rabu(db, b).id_jadwal}", json={"status": "dilewati"}, headers=auth(user))
+    sesi = sesi_rabu(db, b)
+    res = client.patch(f"{URL}/sesi/{sesi.id_jadwal}", json={"status": status_baru}, headers=auth(user))
     assert res.status_code == 409 and "belum mulai" in res.json()["detail"]
+    db.refresh(sesi)
+    assert sesi.status == JADWAL_TERJADWAL
 
 
 @pytest.mark.parametrize("sekarang, kode", [

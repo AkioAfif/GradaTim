@@ -76,6 +76,7 @@ def test_sesi_prasyarat_ditandai_selesai_membuka_task_lanjutan(client, db, auth_
     jawaban = {"q1_focus": 5, "q2_calm": 5, "q3_motivated": 5, "q4_sleep": 5, "q5_readiness": 5}
     client.post("/api/v1/mood", json=jawaban, headers=headers)
 
+    bekukan_jam_endpoint_jadwal(monkeypatch, SENIN_PAGI.replace(hour=8, minute=45))  # sesi 08:00 sudah lewat
     res = client.patch(f"/api/v1/jadwal/sesi/{sesi_dasar.id_jadwal}", json={"status": "selesai"}, headers=headers)
     assert res.json()["status_task"] == "done"
 
