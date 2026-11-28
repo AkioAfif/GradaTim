@@ -12,3 +12,6 @@ venv/
 *.sqlite3
 .coverage
 htmlcov/
+
+# Dataset model personalisasi berisi data pengguna (scripts/ekspor_dataset.py)
+dataset_personalisasi*.csv

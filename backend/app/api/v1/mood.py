@@ -90,6 +90,7 @@ def isi_kuesioner_mood(
         baris = MoodQuestionnaire(id_user=current_user.id_user, tanggal=waktu.hari_ini())
         db.add(baris)
     baris.hasil_akhir = hasil.capacity_index
+    baris.diisi_pada = waktu.sekarang()  # mengisi ulang = jam diperbarui
     baris.answers = [
         QuestionnaireAnswer(nomor_questionnaire=i, nilai_jawaban=nilai)
         for i, nilai in enumerate(payload.as_list(), start=1)

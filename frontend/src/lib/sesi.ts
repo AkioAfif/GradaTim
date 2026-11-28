@@ -1,6 +1,6 @@
 // Aturan aksi pada satu sesi jadwal (jadwal_task) — cermin PATCH /jadwal/sesi/{id} di backend,
-// plus satu aturan tambahan di UI: sesi yang belum mulai tidak bisa ditandai selesai (backend tidak
-// menolaknya, tapi label "selesai" untuk sesi yang belum terjadi akan mengotori dataset model).
+// termasuk: sesi yang belum mulai tidak bisa ditandai selesai/dilewati (backend menjawab 409, karena
+// label untuk sesi yang belum terjadi akan mengotori dataset model).
 
 import type { SesiRead } from "./api/types";
 import { KONFIRMASI_BATAS_JAM, parseWib, tanggalDari } from "./waktu";
