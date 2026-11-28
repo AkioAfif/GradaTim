@@ -142,3 +142,16 @@ def test_respons_berisi_rekomendasi_task_hari_ini(client, db, auth_headers, hari
 def test_rekomendasi_kosong_tanpa_jadwal(client, auth_headers, hari_ini_beku):
     body = isi(client, auth_headers())
     assert body["rekomendasi"] == {"direkomendasikan": [], "disarankan_ditunda": []}
+
+
+
+def test_jam_isi_disimpan_dan_diperbarui_saat_isi_ulang(client, db, auth_headers, monkeypatch, hari_ini_beku):
+    headers = auth_headers()
+    monkeypatch.setattr(waktu, "sekarang", lambda: datetime(2026, 10, 5, 7, 30))
+    id_q = isi(client, headers)["id_questionnaire"]
+    assert db.get(MoodQuestionnaire, id_q).diisi_pada == datetime(2026, 10, 5, 7, 30)
+
+    monkeypatch.setattr(waktu, "sekarang", lambda: datetime(2026, 10, 5, 13, 0))
+    isi(client, headers)
+    db.expire_all()
+    assert db.get(MoodQuestionnaire, id_q).diisi_pada == datetime(2026, 10, 5, 13, 0)

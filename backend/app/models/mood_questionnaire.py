@@ -16,6 +16,8 @@ class MoodQuestionnaire(Base):
     id_user: Mapped[int] = mapped_column(ForeignKey("user.id_user"), index=True)
     tanggal: Mapped[date] = mapped_column(Date)
     hasil_akhir: Mapped[Optional[int]] = mapped_column(Integer)
+    # jam terakhir diisi (WIB); dataset hanya memakai mood yang diisi sebelum sesi mulai (docs/AI.md §2)
+    diisi_pada: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="mood_questionnaires")
     answers: Mapped[list["QuestionnaireAnswer"]] = relationship(

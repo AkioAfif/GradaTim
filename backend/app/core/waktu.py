@@ -13,6 +13,11 @@ def ke_wib_naif(dt: datetime) -> datetime:
     return dt.astimezone(WIB).replace(tzinfo=None)
 
 
+def sekarang() -> datetime:
+    """Waktu sekarang di WIB (naive). Panggil lewat modul (`waktu.sekarang()`) agar mudah di-monkeypatch."""
+    return datetime.now(WIB).replace(tzinfo=None)
+
+
 def hari_ini() -> date:
     """Tanggal hari ini di WIB. Panggil lewat modul (`waktu.hari_ini()`) agar mudah di-monkeypatch di tes."""
     return datetime.now(WIB).date()

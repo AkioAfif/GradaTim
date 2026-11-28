@@ -186,6 +186,11 @@ fitur riwayat masing-masing user.
 
 ### Pengumpulan data
 
+Ekspor: `backend/scripts/ekspor_dataset.py` menulis CSV (satu baris per sesi yang sudah berakhir) dan
+mencetak ringkasan: tingkat konfirmasi total dan per user, porsi eksplorasi, sesi tanpa snapshot, dan
+porsi sesi dengan mood. Arti tiap kolom: [`KAMUS_DATA_DATASET.md`](KAMUS_DATA_DATASET.md). Supaya aturan
+"mood diisi sebelum sesi mulai" bisa diterapkan, `mood_questionnaire` menyimpan jam pengisian (`diisi_pada`).
+
 Data diperoleh dari pemakaian riil (*dogfooding*) oleh tim dan pengguna uji. Perkiraan kasar:
 10 orang × 4 sesi/hari × 14 hari ≈ 500 sampel. Jumlah ini kecil dan akan dinyatakan sebagai
 keterbatasan, tetapi cukup untuk model sederhana dan perbandingan dengan baseline.

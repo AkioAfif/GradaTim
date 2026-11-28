@@ -218,6 +218,7 @@ Primary key komposit `(id_task, id_task_prasyarat)`; constraint
 | `id_user` | integer, FK → `user.id_user` | tidak | Pengisi |
 | `tanggal` | date | tidak | Tanggal pengisian |
 | `hasil_akhir` | integer | ya | `MoodAssessment.capacity_index`: 0 = LOW, 1 = MEDIUM, 2 = HIGH |
+| `diisi_pada` | timestamp | ya | Jam terakhir kuesioner diisi (WIB); dataset model personalisasi hanya memakai mood yang diisi sebelum sesi mulai. Kosong untuk baris lama |
 
 ### `questionnaire_answer`
 
